@@ -1,0 +1,549 @@
+import { ipcMain, BrowserWindow } from 'electron'
+import { execSync, execFile } from 'child_process'
+import os from 'os'
+import { PythonBridge } from '../python/pythonBridge'
+import type {
+  JobControlPayload,
+  JobLaneStatus,
+  JobStatus,
+  ResolveTicketPayload,
+  StartJobPayload,
+} from '../types'
+import { IPC_CHANNELS } from '../types'
+
+const MAX_ACCOUNTS = 50
+const RATE_LIMIT_COOLDOWN_MS = 500
+const CHROMIUM_RAM_PER_ACCOUNT_MB = 350
+const MAX_RAM_USAGE_RATIO = 0.7
+
+const jobs = new Map<string, JobStatus>()
+
+let activeJobId: string | null = null
+let bridge: PythonBridge | null = null
+
+const rateLimitMap = new Map<string, number>()
+
+function checkRateLimit(key: string): void {
+  const now = Date.now()
+  const last = rateLimitMap.get(key) ?? 0
+  if (now - last < RATE_LIMIT_COOLDOWN_MS) {
+    throw new Error(`Rate limited: ${key}. Please wait before retrying.`)
+  }
+  rateLimitMap.set(key, now)
+}
+
+function generateJobId(): string {
+  return `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function cloneJob(job: JobStatus): JobStatus {
+  return {
+    ...job,
+    accountIds: [...job.accountIds],
+    courseIds: job.courseIds ? [...job.courseIds] : undefined,
+    lanes: job.lanes?.map((lane) => ({ ...lane })),
+  }
+}
+
+function validateAccountIds(raw: unknown): number[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('At least one accountId is required.')
+  }
+  if (raw.length > MAX_ACCOUNTS) {
+    throw new Error(`Too many accounts: ${raw.length}. Maximum is ${MAX_ACCOUNTS}.`)
+  }
+
+  const ids: number[] = []
+  for (const value of raw) {
+    const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : value
+    // accountId is the 0-based index from the id=index contract — 0 is the
+    // FIRST account and is valid. Reject only negatives / non-integers; do not
+    // use `<= 0` (that wrongly drops account 0, the falsy-index trap).
+    if (typeof parsed !== 'number' || !Number.isInteger(parsed) || parsed < 0) {
+      throw new Error(`Invalid accountId: ${String(value)}.`)
+    }
+    ids.push(parsed)
+  }
+  return ids
+}
+
+function checkRamLimit(requestedCount: number): { safe: boolean; maxSafe: number; warning: string | null } {
+  const freeMB = os.freemem() / (1024 * 1024)
+  const maxByRam = Math.floor((freeMB * MAX_RAM_USAGE_RATIO) / CHROMIUM_RAM_PER_ACCOUNT_MB)
+  const maxSafe = Math.min(maxByRam, MAX_ACCOUNTS)
+
+  if (requestedCount <= maxSafe) {
+    return { safe: true, maxSafe, warning: null }
+  }
+
+  const warning = [
+    `The selected account count exceeds the current safe memory estimate.`,
+    `Requested: ${requestedCount} accounts.`,
+    `Safe estimate: ${maxSafe} accounts.`,
+    `Free memory: ${Math.round(freeMB / 1024)} GB.`,
+  ].join(' ')
+
+  return { safe: false, maxSafe, warning }
+}
+
+function sendToRenderer(win: BrowserWindow, channel: string, ...args: unknown[]): void {
+  if (!win.isDestroyed()) {
+    win.webContents.send(channel, ...args)
+  }
+}
+
+function createInitialLanes(accountIds: number[]): JobLaneStatus[] {
+  return accountIds.map((accountId) => ({
+    accountId,
+    status: 'running',
+    progress: 0,
+    currentTask: 'Starting job',
+    currentPhase: 'idle',
+  }))
+}
+
+function updateRunningLanes(
+  job: JobStatus,
+  updater: (lane: JobLaneStatus) => JobLaneStatus,
+): void {
+  if (!job.lanes?.length) return
+  job.lanes = job.lanes.map((lane) => {
+    if (lane.status === 'running') {
+      return updater(lane)
+    }
+    return lane
+  })
+}
+
+function markTerminalLanes(job: JobStatus, status: JobLaneStatus['status'], progress: number): void {
+  if (!job.lanes?.length) return
+  job.lanes = job.lanes.map((lane) => {
+    if (lane.status === 'stopped' || lane.status === 'error') {
+      return lane
+    }
+    return {
+      ...lane,
+      status,
+      progress,
+      currentTask: status === 'completed' ? 'Completed' : lane.currentTask,
+      currentPhase: status === 'completed' ? 'completed' : lane.currentPhase,
+    }
+  })
+}
+
+function getJobOrThrow(jobId: string): JobStatus {
+  const job = jobs.get(jobId)
+  if (!job) {
+    throw new Error(`Job ${jobId} not found.`)
+  }
+  return job
+}
+
+function validateControlPayload(payload: JobControlPayload): { job: JobStatus; accountIds: number[] } {
+  const job = getJobOrThrow(payload.jobId)
+  const accountIds = validateAccountIds(payload.accountIds)
+  for (const accountId of accountIds) {
+    if (!job.accountIds.includes(accountId)) {
+      throw new Error(`Account ${accountId} is not part of job ${payload.jobId}.`)
+    }
+  }
+  return { job, accountIds }
+}
+
+function selectedControlUnsupported(): never {
+  throw new Error(
+    'Per-account runtime control is not supported by the current Python backend. Use the global pause/resume/stop controls in Electron mode.',
+  )
+}
+
+/**
+ * Close the persistent playwright-cli browser sessions for the given accounts.
+ *
+ * The visible Chrome windows are children of the long-lived `playwright-cli`
+ * daemon, NOT of the spawned Python process, so terminating Python (even with a
+ * process-tree kill) leaves them running. Each account uses a session named
+ * `chaoxing-chrome-<index>` (see backend auth.ensure_chaoxing_browser). Closing
+ * an absent session is a harmless no-op, and login is preserved because cookies
+ * live in the on-disk --user-data-dir profile.
+ *
+ * Fire-and-forget per session: we don't block the stop response on it.
+ */
+function closeBrowserSessions(accountIds: number[]): void {
+  const cli = process.platform === 'win32' ? 'playwright-cli.cmd' : 'playwright-cli'
+  for (const id of accountIds) {
+    try {
+      execFile(cli, [`-s=chaoxing-chrome-${id}`, 'close'], { timeout: 20000 }, () => {
+        // Ignore: session may already be gone, or the daemon may be down.
+      })
+    } catch {
+      // execFile itself only throws synchronously on bad arguments; ignore.
+    }
+  }
+}
+
+function pauseWholeJob(job: JobStatus): void {
+  if (bridge?.isRunning()) {
+    bridge.pause()
+  }
+
+  job.status = 'paused'
+  job.phase = 'paused'
+  job.message = 'Job paused.'
+  if (job.lanes?.length) {
+    job.lanes = job.lanes.map((lane) =>
+      lane.status === 'running' ? { ...lane, status: 'paused', currentTask: 'Paused' } : lane,
+    )
+  }
+}
+
+function resumeWholeJob(job: JobStatus): void {
+  if (!bridge) {
+    throw new Error('No active Python process. The job cannot be resumed.')
+  }
+
+  bridge.resume()
+  job.status = 'running'
+  job.phase = 'idle'
+  job.message = 'Job resumed.'
+  if (job.lanes?.length) {
+    job.lanes = job.lanes.map((lane) =>
+      lane.status === 'paused' ? { ...lane, status: 'running', currentTask: 'Resuming' } : lane,
+    )
+  }
+}
+
+function stopWholeJob(job: JobStatus): void {
+  if (bridge?.isRunning()) {
+    bridge.stop()
+  }
+
+  // The visible Chrome is a child of the playwright-cli *daemon*, not of the
+  // Python process — so killing Python (even tree-kill) never reaps it. The
+  // only thing that closes it is `playwright-cli -s=<session> close`. Python's
+  // own finally-block close is best-effort and often skipped when STOP escalates
+  // to SIGTERM before a check_signals() checkpoint is reached, so close the
+  // sessions here too. Idempotent: closing an already-gone session is a no-op.
+  closeBrowserSessions(job.accountIds)
+
+  job.status = 'stopped'
+  job.phase = 'stopped'
+  job.message = 'Job stopped.'
+  job.finishedAt = new Date().toISOString()
+  if (job.lanes?.length) {
+    job.lanes = job.lanes.map((lane) =>
+      lane.status === 'completed' ? lane : { ...lane, status: 'stopped', currentTask: 'Stopped' },
+    )
+  }
+
+  activeJobId = null
+  bridge = null
+}
+
+function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
+  const currentBridge = new PythonBridge()
+
+  currentBridge.on('progress', (event) => {
+    const job = jobs.get(jobId)
+    if (!job) return
+
+    job.progress = event.percent
+    job.message = event.message
+    if (typeof event.phaseIndex === 'number') {
+      job.phaseIndex = event.phaseIndex
+    }
+    if (event.phase) {
+      job.phase = event.phase as JobStatus['phase']
+    }
+
+    updateRunningLanes(job, (lane) => ({
+      ...lane,
+      progress: event.percent,
+      currentTask: event.message,
+      currentPhase: event.phase ?? lane.currentPhase,
+    }))
+
+    sendToRenderer(win, IPC_CHANNELS.ON_PROGRESS, event)
+  })
+
+  currentBridge.on('phase', (event) => {
+    const job = jobs.get(jobId)
+    if (!job) return
+
+    job.phase = event.phase
+    if (typeof event.phaseIndex === 'number') {
+      job.phaseIndex = event.phaseIndex
+    }
+
+    updateRunningLanes(job, (lane) => ({
+      ...lane,
+      currentPhase: event.phase,
+      currentTask: `Running ${event.phase}`,
+    }))
+
+    sendToRenderer(win, IPC_CHANNELS.ON_PHASE_CHANGE, event)
+  })
+
+  currentBridge.on('log', (event) => {
+    sendToRenderer(win, IPC_CHANNELS.ON_LOG, event)
+  })
+
+  currentBridge.on('ticket', (event) => {
+    sendToRenderer(win, IPC_CHANNELS.ON_TICKET, event)
+  })
+
+  currentBridge.on('error', (event) => {
+    const job = jobs.get(jobId)
+    if (!job) return
+
+    job.status = 'error'
+    job.message = event.error
+    job.phase = (event.phase as JobStatus['phase']) ?? 'error'
+    markTerminalLanes(job, 'error', job.progress)
+    sendToRenderer(win, IPC_CHANNELS.ON_ERROR, event)
+  })
+
+  currentBridge.on('done', (event) => {
+    const job = jobs.get(jobId)
+    if (!job) return
+
+    job.status = 'completed'
+    job.phase = 'completed'
+    job.progress = 100
+    job.message = 'Job completed.'
+    job.finishedAt = new Date().toISOString()
+    markTerminalLanes(job, 'completed', 100)
+
+    sendToRenderer(win, IPC_CHANNELS.ON_COMPLETED, event)
+    activeJobId = null
+  })
+
+  currentBridge.on('result', (event) => {
+    sendToRenderer(win, IPC_CHANNELS.ON_RESULT, event)
+  })
+
+  currentBridge.on('exit', (code) => {
+    const job = jobs.get(jobId)
+    if (job && job.status !== 'completed' && job.status !== 'stopped') {
+      job.status = 'error'
+      job.phase = 'error'
+      job.message = `Python process exited with code ${code}.`
+      markTerminalLanes(job, 'error', job.progress)
+    }
+    bridge = null
+    activeJobId = null
+  })
+
+  return currentBridge
+}
+
+export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): void {
+  ipcMain.handle(IPC_CHANNELS.JOB_START, async (_event, payload: StartJobPayload) => {
+    checkRateLimit('job:start')
+
+    const win = getMainWindow()
+    if (!win) {
+      throw new Error('No main window available.')
+    }
+
+    const rawAccountIds = payload.accountIds?.length ? payload.accountIds : []
+    const accountIds = validateAccountIds(rawAccountIds)
+
+    const ramCheck = checkRamLimit(accountIds.length)
+    if (!ramCheck.safe) {
+      throw new Error(ramCheck.warning ?? 'Insufficient memory for the selected accounts.')
+    }
+
+    if (activeJobId) {
+      throw new Error(`Job ${activeJobId} is already running. Stop it first.`)
+    }
+
+    const jobId = generateJobId()
+    const now = new Date().toISOString()
+    const courseIds = payload.courseIds ?? []
+    // 仅内容 arrives as mode='solve_only' (the renderer maps batch-exec →
+    // solve_only) + focus='content'. solve_only means quiz-only on the backend,
+    // which combined with --content-only would skip BOTH phases. Override to
+    // 'full' so the content phase actually runs and --content-only trims the quiz.
+    const mode = payload.options?.focus === 'content' ? 'full' : (payload.mode ?? 'full')
+
+    const jobStatus: JobStatus = {
+      jobId,
+      status: 'running',
+      phase: 'idle',
+      phaseIndex: 0,
+      progress: 0,
+      message: 'Starting job.',
+      startedAt: now,
+      accountIds,
+      courseIds,
+      lanes: createInitialLanes(accountIds),
+    }
+
+    jobs.set(jobId, jobStatus)
+    activeJobId = jobId
+    bridge = createBridgeAndBind(win, jobId)
+
+    const args: string[] = ['--job-id', jobId, '--accounts', accountIds.join(',')]
+    if (mode) {
+      args.push('--mode', mode)
+    }
+    if (courseIds.length > 0) {
+      args.push('--courses', courseIds.join(','))
+    }
+    // "模拟运行" — solve/fill/AI-grade but never submit (backend grade_only).
+    if (payload.options?.dryRun) {
+      args.push('--grade-only')
+    }
+    // 仅内容: a full-mode run restricted to the content phase. (仅刷题 is
+    // already expressed as mode='solve_only' by the renderer's mapMode.)
+    if (payload.options?.focus === 'content') {
+      args.push('--content-only')
+    }
+
+    try {
+      bridge.start(args)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      jobStatus.status = 'error'
+      jobStatus.phase = 'error'
+      jobStatus.message = message
+      markTerminalLanes(jobStatus, 'error', 0)
+      activeJobId = null
+      bridge = null
+      throw new Error(`Failed to start Python process: ${message}`)
+    }
+
+    return { jobId }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.JOB_PAUSE, async (_event, jobId: string) => {
+    checkRateLimit('job:pause')
+    const job = getJobOrThrow(jobId)
+    pauseWholeJob(job)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.JOB_RESUME, async (_event, jobId: string) => {
+    checkRateLimit('job:resume')
+    const job = getJobOrThrow(jobId)
+    resumeWholeJob(job)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.JOB_STOP, async (_event, jobId: string) => {
+    checkRateLimit('job:stop')
+    const job = getJobOrThrow(jobId)
+    stopWholeJob(job)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.JOB_PAUSE_SELECTED, async (_event, payload: JobControlPayload) => {
+    checkRateLimit('job:pause-selected')
+    const { job, accountIds } = validateControlPayload(payload)
+    if (accountIds.length === job.accountIds.length) {
+      pauseWholeJob(job)
+      return
+    }
+    return selectedControlUnsupported()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.JOB_RESUME_SELECTED, async (_event, payload: JobControlPayload) => {
+    checkRateLimit('job:resume-selected')
+    const { job, accountIds } = validateControlPayload(payload)
+    if (accountIds.length === job.accountIds.length) {
+      resumeWholeJob(job)
+      return
+    }
+    return selectedControlUnsupported()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.JOB_STOP_SELECTED, async (_event, payload: JobControlPayload) => {
+    checkRateLimit('job:stop-selected')
+    const { job, accountIds } = validateControlPayload(payload)
+    if (accountIds.length === job.accountIds.length) {
+      stopWholeJob(job)
+      return
+    }
+    return selectedControlUnsupported()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.JOB_STATUS, async (_event, jobId: string) => {
+    return cloneJob(getJobOrThrow(jobId))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.JOB_RESOLVE_TICKET, async (_event, payload: ResolveTicketPayload) => {
+    checkRateLimit('job:resolve-ticket')
+
+    if (!payload || typeof payload.ticketId !== 'string' || !payload.ticketId) {
+      throw new Error('A ticketId is required to resolve a ticket.')
+    }
+    if (typeof payload.accountId !== 'number' || !Number.isInteger(payload.accountId)) {
+      throw new Error('A numeric accountId is required to resolve a ticket.')
+    }
+    if (payload.action !== 'skip' && typeof payload.answer !== 'string') {
+      throw new Error('Either an answer or action: "skip" is required.')
+    }
+
+    if (!bridge?.isRunning()) {
+      throw new Error('No active Python process. The ticket cannot be resolved.')
+    }
+
+    bridge.resolveTicket({
+      ticketId: payload.ticketId,
+      accountId: payload.accountId,
+      answer: payload.answer,
+      action: payload.action,
+    })
+  })
+}
+
+export function stopActiveJob(): void {
+  if (!bridge || !bridge.isRunning()) {
+    activeJobId = null
+    bridge = null
+    return
+  }
+
+  bridge.stop()
+
+  // Close the playwright-cli browser sessions for whatever job is active, for
+  // the same reason as stopWholeJob: Chrome is the daemon's child, not Python's.
+  if (activeJobId) {
+    const activeJob = jobs.get(activeJobId)
+    if (activeJob) closeBrowserSessions(activeJob.accountIds)
+  }
+
+  let elapsedSeconds = 0
+  const interval = setInterval(() => {
+    elapsedSeconds += 1
+    if (!bridge || !bridge.isRunning() || elapsedSeconds >= 10) {
+      clearInterval(interval)
+      if (bridge && bridge.isRunning()) {
+        const pid = (bridge as unknown as { process?: { pid?: number } }).process?.pid
+        // taskkill is Windows-only; on other platforms the SIGKILL path in
+        // PythonBridge.stop() already covers forced termination.
+        if (pid && process.platform === 'win32') {
+          try {
+            execSync(`taskkill /f /pid ${pid} /t 2>nul`, { timeout: 5000 })
+          } catch {
+            // Ignore cleanup failures during shutdown.
+          }
+        }
+      }
+      bridge = null
+    }
+  }, 1000)
+
+  if (activeJobId) {
+    const job = jobs.get(activeJobId)
+    if (job) {
+      job.status = 'stopped'
+      job.phase = 'stopped'
+      job.message = 'Job stopped during app shutdown.'
+      job.finishedAt = new Date().toISOString()
+      if (job.lanes?.length) {
+        job.lanes = job.lanes.map((lane) =>
+          lane.status === 'completed' ? lane : { ...lane, status: 'stopped', currentTask: 'Stopped' },
+        )
+      }
+    }
+    activeJobId = null
+  }
+}

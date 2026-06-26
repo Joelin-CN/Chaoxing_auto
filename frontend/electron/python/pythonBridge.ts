@@ -1,0 +1,317 @@
+import { EventEmitter } from 'events'
+import { spawn, ChildProcess } from 'child_process'
+import { CODE_DIR, WORKSPACE_DIR } from '../backendPath'
+import { getCurrentSettings } from '../ipc/status.handler'
+import type {
+  PythonBridgeEvent,
+  PythonProgressEvent,
+  PythonPhaseEvent,
+  PythonLogEvent,
+  PythonTicketEvent,
+  PythonErrorEvent,
+  PythonDoneEvent,
+  PythonResultEvent,
+} from '../types'
+
+// ----------------------------------------------------------------
+// Memory safety constants
+// ----------------------------------------------------------------
+
+/** Estimated RAM (MB) consumed by a single headless Chromium session.
+ *  Empirical measurement: ~300-400MB per Playwright Chromium instance.
+ *  Using 350MB as a conservative estimate to avoid underestimating. */
+const CHROMIUM_RAM_PER_ACCOUNT_MB = 350
+
+/** Maximum fraction of free system RAM we're willing to consume with
+ *  Chromium sessions. Using 0.7 leaves 30% headroom for OS + GPU driver. */
+const MAX_RAM_USAGE_RATIO = 0.7
+
+/** Chromium flags to reduce per-instance memory/VRAM footprint:
+ *  --renderer-process-limit=1     → single renderer process per browser
+ *  --disable-dev-shm-usage        → use /tmp instead of /dev/shm (less RAM)
+ *  --max-old-space-size=512       → cap V8 heap at 512MB
+ *  --disable-gpu                  → no GPU rendering/compositing (new-headless
+ *                                   Chromium would otherwise allocate VRAM)
+ *  --disable-software-rasterizer  → don't fall back to SwiftShader either;
+ *                                   keeps both VRAM and CPU rasterization down */
+const CHROMIUM_MEMORY_FLAGS = [
+  '--renderer-process-limit=1',
+  '--disable-dev-shm-usage',
+  '--max-old-space-size=512',
+  '--disable-gpu',
+  '--disable-software-rasterizer',
+]
+
+// ----------------------------------------------------------------
+// Type guards
+// ----------------------------------------------------------------
+
+function isBridgeEvent(obj: unknown): obj is PythonBridgeEvent {
+  if (typeof obj !== 'object' || obj === null) return false
+  const o = obj as Record<string, unknown>
+  const known = ['PROGRESS', 'LOG', 'PHASE', 'TICKET', 'RESULT', 'ERROR', 'DONE']
+  return typeof o.type === 'string' && known.includes(o.type)
+}
+
+// ----------------------------------------------------------------
+// PythonBridge
+// ----------------------------------------------------------------
+
+export interface PythonBridgeEvents {
+  progress: [PythonProgressEvent]
+  phase: [PythonPhaseEvent]
+  log: [PythonLogEvent]
+  ticket: [PythonTicketEvent]
+  error: [PythonErrorEvent]
+  result: [PythonResultEvent]
+  done: [PythonDoneEvent]
+  exit: [code: number | null]
+}
+
+export declare interface PythonBridge {
+  on<E extends keyof PythonBridgeEvents>(event: E, listener: (...args: PythonBridgeEvents[E]) => void): this
+  emit<E extends keyof PythonBridgeEvents>(event: E, ...args: PythonBridgeEvents[E]): boolean
+}
+
+export class PythonBridge extends EventEmitter {
+  private process: ChildProcess | null = null
+  private buffer = ''
+  private stopping = false
+  private killTimer1: NodeJS.Timeout | null = null
+  private killTimer2: NodeJS.Timeout | null = null
+  private safetyTimer: NodeJS.Timeout | null = null
+
+  // ================================================================
+  // Real process
+  // ================================================================
+
+  start(args: string[]): void {
+    // Canonical backend entry is the JSON-line protocol module
+    // `python -m chaoxing.api` (NOT the legacy scripts/ shim, which does not
+    // speak the protocol). It must run with cwd = backend root so the
+    // `chaoxing` package is importable.
+    //
+    // Whitelist: only forward necessary env vars to the Python subprocess.
+    // Using ...process.env would leak sensitive variables like ARK_API_KEY,
+    // DOUBAO_TOKEN, and other credentials stored in the environment.
+    const ALLOWED_ENV = [
+      'PATH', 'SYSTEMROOT', 'SYSTEMDRIVE', 'TEMP', 'TMP',
+      'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
+      'PYTHONPATH', 'PYTHONHOME',
+      'CHAOXING_WORKSPACE', 'CHAOXING_HEADED',
+    ]
+    const safeEnv: Record<string, string> = { PYTHONUNBUFFERED: '1' }
+    for (const key of ALLOWED_ENV) {
+      if (process.env[key] !== undefined) {
+        safeEnv[key] = process.env[key]!
+      }
+    }
+    // Pin the workspace to the writable runtime root (= backend subtree in dev,
+    // userData/workspace when packaged) so chaoxing_config.json and output/
+    // temp/ logs/ resolve there, not next to the read-only code. An explicit env
+    // value (e.g. for a relocated workspace) still wins.
+    safeEnv.CHAOXING_WORKSPACE = process.env.CHAOXING_WORKSPACE ?? WORKSPACE_DIR
+
+    // Honor the user's headless setting. The backend reads CHAOXING_HEADED ("1"
+    // launches a visible browser); headless:true (the default) leaves it "0".
+    const settings = getCurrentSettings()
+    safeEnv.CHAOXING_HEADED = settings.headless ? '0' : '1'
+
+    // Prepend Chromium memory-optimization flags so the Python
+    // backend can pass them to Playwright when launching browsers.
+    const fullArgs = ['-m', 'chaoxing.api', '--chromium-flags', CHROMIUM_MEMORY_FLAGS.join(' '), ...args]
+
+    // Honor the configured interpreter (default 'python', resolved via PATH).
+    const pythonPath = settings.pythonPath || 'python'
+
+    this.process = spawn(pythonPath, fullArgs, {
+      cwd: CODE_DIR,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: safeEnv,
+    })
+
+    // Hard safety: kill Python after 2 hours max runtime to prevent
+    // runaway processes from consuming system resources indefinitely.
+    this.safetyTimer = setTimeout(() => {
+      if (this.process && !this.process.killed) {
+        this.process.kill('SIGTERM')
+        setTimeout(() => {
+          if (this.process && !this.process.killed) {
+            this.process.kill('SIGKILL')
+          }
+        }, 5000)
+      }
+    }, 7_200_000) // 2 hours
+
+    this.process.stdout?.on('data', (chunk: Buffer) => {
+      this.buffer += chunk.toString('utf-8')
+      this.flushBuffer()
+    })
+
+    this.process.stderr?.on('data', (chunk: Buffer) => {
+      const msg = chunk.toString('utf-8').trim()
+      if (msg) {
+        this.emit('log', {
+          type: 'LOG',
+          jobId: 'main',
+          level: 'error',
+          message: `[stderr] ${msg}`,
+          timestamp: new Date().toISOString(),
+        })
+      }
+    })
+
+    this.process.on('exit', (code) => {
+      this.clearKillTimers()
+      if (this.safetyTimer) {
+        clearTimeout(this.safetyTimer)
+        this.safetyTimer = null
+      }
+      this.flushBuffer()
+      this.emit('exit', code)
+      this.process = null
+    })
+
+    this.process.on('error', (err) => {
+      this.emit('error', {
+        type: 'ERROR',
+        jobId: 'main',
+        error: `Python process error: ${err.message}`,
+        stack: err.stack,
+      })
+    })
+  }
+
+  pause(): void {
+    this.sendSignal('PAUSE')
+  }
+
+  resume(): void {
+    this.sendSignal('RESUME')
+  }
+
+  /**
+   * Send a captcha/ticket resolution back to the Python backend.
+   *
+   * The backend's StdinController reads newline-delimited JSON. It routes the
+   * answer to the per-account file by `accountId`, so the frontend never needs
+   * to know the file name. `action: 'skip'` tells the backend to abandon the
+   * current course's content phase for this account and move on.
+   */
+  resolveTicket(payload: {
+    ticketId: string
+    accountId: number
+    answer?: string
+    action?: 'skip'
+  }): void {
+    this.sendJson({ type: 'RESOLVE_TICKET', ...payload })
+  }
+
+  private sendJson(obj: unknown): void {
+    if (this.process?.stdin?.writable) {
+      this.process.stdin.write(`${JSON.stringify(obj)}\n`)
+    }
+  }
+
+  stop(): void {
+    if (!this.process) return
+
+    this.stopping = true
+
+    // Ask nicely first
+    this.sendSignal('STOP')
+
+    // Force SIGTERM after 5 seconds
+    this.killTimer1 = setTimeout(() => {
+      if (this.process && !this.process.killed) {
+        this.process.kill('SIGTERM')
+      }
+    }, 5000)
+
+    // Hard SIGKILL after 8 seconds regardless
+    this.killTimer2 = setTimeout(() => {
+      if (this.process && !this.process.killed) {
+        this.process.kill('SIGKILL')
+      }
+    }, 8000)
+  }
+
+  private clearKillTimers(): void {
+    if (this.killTimer1) {
+      clearTimeout(this.killTimer1)
+      this.killTimer1 = null
+    }
+    if (this.killTimer2) {
+      clearTimeout(this.killTimer2)
+      this.killTimer2 = null
+    }
+  }
+
+  isRunning(): boolean {
+    return this.process !== null && !this.process.killed
+  }
+
+  // ================================================================
+  // Internal helpers
+  // ================================================================
+
+  private sendSignal(signal: string): void {
+    if (this.process?.stdin?.writable) {
+      this.process.stdin.write(`${signal}\n`)
+    }
+  }
+
+  private flushBuffer(): void {
+    const lines = this.buffer.split('\n')
+    // Keep the last (possibly incomplete) line
+    this.buffer = lines.pop() ?? ''
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+
+      try {
+        const obj = JSON.parse(trimmed)
+        if (isBridgeEvent(obj)) {
+          this.dispatch(obj)
+        }
+      } catch {
+        // Non-JSON line — emit as log
+        this.emit('log', {
+          type: 'LOG',
+          jobId: 'main',
+          level: 'info',
+          message: trimmed,
+          timestamp: new Date().toISOString(),
+        })
+      }
+    }
+  }
+
+  private dispatch(event: PythonBridgeEvent): void {
+    switch (event.type) {
+      case 'PROGRESS':
+        this.emit('progress', event)
+        break
+      case 'PHASE':
+        this.emit('phase', event)
+        break
+      case 'LOG':
+        this.emit('log', event)
+        break
+      case 'TICKET':
+        this.emit('ticket', event)
+        break
+      case 'ERROR':
+        this.emit('error', event)
+        break
+      case 'RESULT':
+        this.emit('result', event)
+        break
+      case 'DONE':
+        this.emit('done', event)
+        break
+    }
+  }
+
+}

@@ -1,0 +1,104 @@
+{
+  "session": "chaoxing-chrome",
+  "playwright_cli": "playwright-cli.cmd",
+  "workspace_root": "E:/B306/web/chaoxing.(xuexitong",
+  "chrome_args": ["--disable-gpu", "--disable-software-rasterizer"],
+  "max_concurrent": 10,
+
+  "ai": {
+    "provider": "doubao-api",
+    "note": "Doubao API is the sole AI backend. DeepSeek web has been removed.",
+    "doubao": {
+      "model": "ep-20260623213918-x92x8",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "timeout": 180,
+      "max_retries": 3,
+      "retry_base_delay": 2
+    }
+  },
+
+  "courses": [
+    {
+      "name": "概率论与数理统计",
+      "priority": 1,
+      "courseid": "255106367",
+      "clazzid": "127207872",
+      "cpi": "415409200",
+      "current_progress": 79,
+      "total_tasks": 100,
+      "remaining_quiz_sections": [
+        {"chapter": 1, "section": "1.6", "name": "章节测试1", "tasks": 1},
+        {"chapter": 1, "section": "1.7", "name": "章节测试2", "tasks": 1},
+        {"chapter": 2, "section": "2.6", "name": "第二章测试1", "tasks": 1},
+        {"chapter": 2, "section": "2.7", "name": "第二章测试2", "tasks": 1},
+        {"chapter": 3, "section": "3.7", "name": "章节测试1", "tasks": 1},
+        {"chapter": 3, "section": "3.8", "name": "章节测试2", "tasks": 1},
+        {"chapter": 4, "section": "4.5", "name": "章节测试1", "tasks": 1},
+        {"chapter": 4, "section": "4.6", "name": "章节测试2", "tasks": 1},
+        {"chapter": 5, "section": "5.3", "name": "章节测试1", "tasks": 1},
+        {"chapter": 5, "section": "5.4", "name": "章节测试2", "tasks": 1},
+        {"chapter": 6, "section": "6.4", "name": "章节测试1", "tasks": 1},
+        {"chapter": 6, "section": "6.5", "name": "章节测试2", "tasks": 1},
+        {"chapter": 7, "section": "7.5", "name": "章节测试1", "tasks": 1},
+        {"chapter": 7, "section": "7.6", "name": "章节测试2", "tasks": 1},
+        {"chapter": 8, "section": "8.5", "name": "章节测试1", "tasks": 1},
+        {"chapter": 8, "section": "8.6", "name": "章节测试2", "tasks": 1}
+      ],
+      "remaining_content_sections": [
+        {"chapter": 1, "section": "1.8", "name": "课程思政/教学应用案例", "tasks": 2},
+        {"chapter": 5, "section": "5.5", "name": "课程思政/教学应用案例", "tasks": 2},
+        {"chapter": 7, "section": "7.7", "name": "课程思政/教学应用案例", "tasks": 1},
+        {"chapter": 9, "section": "9.4", "name": "练习与测试", "tasks": 0}
+      ]
+    },
+    {
+      "name": "大学物理ABC（下）",
+      "priority": 2,
+      "courseid": "214594847",
+      "clazzid": "127342628",
+      "cpi": "415409200",
+      "current_progress": 0,
+      "total_tasks": 88,
+      "chapters": [
+        {"num": 1, "name": "静电场", "sections": 7, "tasks_per": [2,2,2,2,2,2,0]},
+        {"num": 2, "name": "静电场中的导体与电介质", "sections": 3, "tasks_per": [4,4,4]},
+        {"num": 3, "name": "恒定磁场", "sections": 5, "tasks_per": [2,2,2,2,4]},
+        {"num": 4, "name": "电磁感应 电磁场", "sections": 5, "tasks_per": [4,5,4,4,5]},
+        {"num": 5, "name": "相对论", "sections": 3, "tasks_per": [4,4,4]},
+        {"num": 6, "name": "量子力学基础", "sections": 4, "tasks_per": [4,4,4,3]},
+        {"num": 7, "name": "课外阅读观看材料", "sections": 2, "tasks_per": [3,0]}
+      ]
+    },
+    {
+      "name": "综合英语-2025",
+      "priority": 3,
+      "courseid": "254993142",
+      "clazzid": "127285559",
+      "cpi": "415409200",
+      "current_progress": 0,
+      "total_tasks": 77,
+      "chapters": [
+        {"num": 1, "name": "Unit 1 The Digital Age", "sections": 4, "tasks_per": [3,6,4,2]},
+        {"num": 2, "name": "Unit 2 Life Stories", "sections": 4, "tasks_per": [3,6,3,2]},
+        {"num": 3, "name": "Unit 3 Let's Go", "sections": 4, "tasks_per": [9,6,2,2]},
+        {"num": 4, "name": "Unit 4 When Work is a Pleasure", "sections": 4, "tasks_per": [6,8,3,1]},
+        {"num": 5, "name": "Unit 5 China's Space Dream", "sections": 4, "tasks_per": [3,6,0,2]}
+      ]
+    }
+  ],
+
+  "timeouts": {
+    "page_load": 30,
+    "video_watch": 60,
+    "quiz_answer": 120,
+    "section_complete": 15,
+    "snapshot": 15,
+    "click_action": 10
+  },
+
+  "retry": {
+    "quiz_max_retries": 10,
+    "quiz_target_score": 100,
+    "section_max_retries": 3
+  }
+}

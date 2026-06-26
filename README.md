@@ -1,0 +1,189 @@
+# 超星助手 (Chaoxing Assistant)
+
+超星学习通课程自动化管理工具。桌面端前端 (Electron + Vue 3) 驱动 Python 后端 (Playwright 浏览器自动化 + AI 答题) 完成课程学习、章节处理与测验答题。
+
+> Monorepo：前端在 `frontend/`，后端在 `backend/`。前端在纯浏览器环境下自动切换 Mock 模式，无需后端即可开发调试 UI。后端整合细节见 **[docs/INTEGRATION.md](docs/INTEGRATION.md)**。
+
+## 架构总览
+
+```
+┌─────────────────────────────────────────────┐
+│            Vue 3 前端 (Renderer)             │
+│   Views / Components ←→ Pinia Stores (8)     │
+│              ChaoxingApi (interface)         │
+│         ├── ElectronApiClient (生产)         │
+│         └── MockApiClient     (开发)         │
+└───────────────────────┬─────────────────────┘
+                        │ window.electronAPI (contextBridge / IPC)
+┌───────────────────────▼─────────────────────┐
+│             Electron Main Process            │
+│   IPC Handlers (job / course / status)       │
+│              ←→ PythonBridge (spawn)          │
+│   + RAM 安全检查  + 500ms 限流                │
+└───────────────────────┬─────────────────────┘
+                        │ stdin 信号 / stdout NDJSON
+┌───────────────────────▼─────────────────────┐
+│             Python 后端 (子进程)             │
+│   python -m chaoxing.api  (backend/)         │
+│   + Playwright 封装 + AI 答题 (Doubao API)      │
+└─────────────────────────────────────────────┘
+```
+
+- **命令流**：Vue Store → ElectronApiClient → IPC invoke → Main Handler → PythonBridge → Python 子进程
+- **事件流**：Python 子进程 → stdout NDJSON → PythonBridge 解析 → IPC push → ElectronApiClient 回调 → Pinia Store
+
+## 快速开始
+
+```bash
+cd frontend
+npm install
+
+# Web 开发模式（Mock 数据，无需后端）
+npm run dev
+
+# Electron 开发模式（真实 IPC + Python 后端）
+npm run dev:electron
+
+# 仅构建 Web 产物
+npm run build:web
+
+# 构建桌面应用
+npm run build
+
+# 类型检查
+npm run typecheck
+```
+
+详细脚本与目录说明见 **[frontend/README.md](frontend/README.md)**。
+
+## 前置依赖
+
+桌面端不打包 Python / Node / Chrome —— 这些需在目标机器自行安装：
+
+| 依赖 | 要求 | 说明 |
+|------|------|------|
+| **Python** | 3.10+ | 后端运行时；确保 `python` 在 PATH（或在「系统设置 → Python 路径」中指定） |
+| **Python 依赖** | `pip install -r backend/requirements.txt` | Playwright 封装、AI 答题等 |
+| **Node.js** | 18+ | 仅开发 / 打包需要 |
+| **playwright-cli** | `npm i -g playwright-cli` | 后端通过它驱动浏览器；须在 PATH |
+| **Chrome** | 已安装 | Playwright 以 `--browser=chrome` 持久化模式启动 |
+| **余额查询（可选）** | `pip install volcengine-python-sdk` | 仅「仪表盘 → 余额查询」需要；若装在独立解释器，设环境变量 `CHAOXING_BALANCE_PYTHON` 指向它 |
+
+**凭据文件**（放在 `backend/passwords/`，**不随安装包分发**，需自行创建）：
+
+| 文件 | 内容 |
+|------|------|
+| `chaoxing.txt` | 超星账号密码 |
+| `doubao.txt` | `ARK_API_KEY="..."`（豆包 Ark 推理密钥，用于 AI 答题） |
+| `volc_billing.txt` | `VOLC_ACCESS_KEY="..."` 与 `VOLC_SECRET_KEY="..."`（火山引擎 AK/SK，仅余额查询需要） |
+
+> 打包后凭据/配置/运行产物落在可写工作区（`%APPDATA%/超星助手/workspace/`），首启自动从安装目录播种配置与只读资产，不会覆盖你已存在的文件。
+
+## 打包与分发
+
+```bash
+cd frontend
+npm install
+npm run build        # vite build + electron-builder
+```
+
+产物在 `frontend/release/`（Windows NSIS 安装包）。打包仅含 Electron 应用 + 只读的 `backend/` 代码（排除 `passwords/`、`output/`、`temp/`、`logs/`、`__pycache__/`）；Python 运行时与上述依赖仍需目标机器自备。当前只产出 Windows 目标。
+
+## 技术栈
+
+- **Vue 3.4** + Composition API + `<script setup>`
+- **Vue Router 4**（hash 模式）
+- **Pinia 2**（8 个 Store）
+- **TypeScript 5**（strict）+ **vue-tsc 2.x** 类型检查
+- **Vite 5** 构建
+- **Electron 28** 桌面壳
+
+## 页面路由
+
+默认重定向 `/` → `/dashboard`。
+
+| 路由 | 视图 | 功能 |
+|------|------|------|
+| `/dashboard` | 仪表盘 | 统计卡片、账号矩阵、资源监控、时间线 |
+| `/course-atlas` | 课程总览 | 账号面板 + 课程网格，扫描与任务启动 |
+| `/execution-studio` | 执行监控 | 状态横幅、阶段步进器、账号泳道 |
+| `/attention-queue` | 关注队列 | 工单分级、结果预测、操作日志 Feed |
+| `/settings` | 系统设置 | AI、浏览器、账号凭据、主题 |
+
+## 前后端通信契约
+
+完整定义见 **[docs/api/FRONTEND_BACKEND_API.md](docs/api/FRONTEND_BACKEND_API.md)**，分三层。
+
+### Layer 1 — `ChaoxingApi` 接口（Store 层）
+
+字符串 ID、UI 形态类型。`ElectronApiClient` 与 `MockApiClient` 都实现此接口。核心方法：`startJob` / `pauseJob` / `resumeJob` / `stopJob` / `pauseSelected` / `resumeSelected` / `stopSelected` / `getJobStatus` / `scanCourses` / `getCourses` / `getAccounts` / `getAccountStatus` / `getSettings` / `setSettings` / `getTickets` / `resolveTicket` / `resolveCaptcha` / `getBalance` + 事件订阅 `onProgress` / `onPhaseChange` / `onLog` / `onTicket` / `onCompleted` / `onError` / `onResult`。
+
+### Layer 2 — Electron IPC 协议
+
+数字 ID、后端形态类型。16 个 invoke 通道 + 7 个事件通道：
+
+**Renderer → Main (invoke)**
+
+| Channel | Payload | Response |
+|---------|---------|----------|
+| `job:start` | `{ accountIds: number[], courseIds?, mode? }` | `{ jobId }` |
+| `job:pause` / `job:resume` / `job:stop` | `jobId` | void |
+| `job:pause-selected` / `job:resume-selected` / `job:stop-selected` | `{ jobId, accountIds }` | void（真子集抛错） |
+| `job:status` | `jobId` | `JobStatus` |
+| `courses:scan` | `{ accountIds, courseIds? }` | `Course[]` |
+| `courses:list` | `accountId` | `Course[]` |
+| `accounts:list` | — | `Account[]` |
+| `accounts:status` | `accountId` | `AccountStatus` |
+| `settings:get` / `backend-settings:get` | — | `Settings` |
+| `settings:set` / `backend-settings:set` | `Partial<Settings>` | void |
+| `tickets:list` | — | `Ticket[]` |
+| `tickets:resolve` | `ticketId, resolution` | void |
+| `job:resolve-ticket` | `{ ticketId, accountId, answer? \| action:'skip' }` | void（验证码回传，转 stdin） |
+| `balance:query` | — | `BalanceResult`（余额查询，§4.7） |
+
+**Main → Renderer (event)**：`on-progress` / `on-phase-change` / `on-log` / `on-ticket` / `on-completed` / `on-error` / `on-result`，载荷为对应的 `Python*Event` 原始对象。
+
+### Layer 3 — Python 子进程协议
+
+**命令行入口**（`python -m chaoxing.api`，cwd = `backend/`）：
+
+```
+python -m chaoxing.api --chromium-flags "<flags>" --job-id <id> --accounts <csv> --mode <full|scan_only|solve_only> [--courses <csv>]
+```
+
+**stdin 控制信号**（逐行）：`PAUSE\n` / `RESUME\n` / `STOP\n`
+
+**stdout 事件**（NDJSON，每行一个 JSON 对象，含 `type` 判别字段）：
+
+```json
+{"type":"PROGRESS","jobId":"...","percent":45,"message":"...","phase":"solve_quiz","phaseIndex":3}
+{"type":"PHASE","jobId":"...","phase":"solve_quiz","phaseIndex":3,"fromPhase":"process_sections"}
+{"type":"LOG","jobId":"...","level":"info","message":"...","timestamp":"2026-06-26T12:00:00.000Z"}
+{"type":"TICKET","jobId":"...","ticket":{ "id":"...", "type":"captcha", "title":"...", "message":"...", "resolved":false, "createdAt":"..." }}
+{"type":"RESULT","jobId":"...","data":{ /* 自由格式 */ }}
+{"type":"ERROR","jobId":"...","error":"...","stack":"...","recoverable":false}
+{"type":"DONE","jobId":"..."}
+```
+
+> 非 JSON 的 stdout 行会被包装为 `LOG` 事件（level=info）；stderr 行被包装为 `LOG` 事件（level=error，前缀 `[stderr]`）。
+
+后端接入只需实现 Layer 3：解析上述命令行参数、stdout 输出 NDJSON 事件流、stdin 读取控制信号、遵守优雅停止与 2 小时硬超时。
+
+> **余额查询子命令**（独立于任务流）：`python -m chaoxing.balance` 查询火山引擎现金余额，输出单行 `BALANCE` JSON 后退出，须用装有 `volcengine-python-sdk` 的解释器拉起（默认走配置的 Python；可用 `CHAOXING_BALANCE_PYTHON` 覆盖）。详见 [API 文档 §4.7](docs/api/FRONTEND_BACKEND_API.md)。
+
+## 文档索引
+
+| 文档 | 内容 |
+|------|------|
+| [docs/api/FRONTEND_BACKEND_API.md](docs/api/FRONTEND_BACKEND_API.md) | 前后端完整 API 契约（三层协议、类型映射、安全、错误处理） |
+| [docs/INTEGRATION.md](docs/INTEGRATION.md) | 前后端整合细节 |
+| [frontend/README.md](frontend/README.md) | 前端脚本、目录结构、模式、约束 |
+| [backend/README.md](backend/README.md) | 后端运行、配置、AI 答题与并发架构 |
+| [docs/reference/](docs/reference/) | 架构报告、自动答题设计、参考资料 |
+
+## 安全与稳定性要点
+
+- **环境变量白名单**：PythonBridge 仅透传系统基础变量 + `CHAOXING_WORKSPACE` / `CHAOXING_HEADED`，显式排除 `ARK_API_KEY` 等凭据。
+- **RAM 安全检查**：每账号预估 ~350MB Chromium 内存，最多使用 70% 空闲内存，超限抛出中文警告。
+- **进程治理**：单任务互斥；2 小时硬超时（SIGTERM→SIGKILL）；退出时清理孤儿 Chromium 进程。
+- **渲染进程隔离**：`contextIsolation` + `sandbox` 开启，`nodeIntegration` 关闭，注入 CSP。
