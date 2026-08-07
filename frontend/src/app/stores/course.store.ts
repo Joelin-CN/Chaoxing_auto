@@ -22,6 +22,7 @@ export const useCourseStore = defineStore('course', () => {
   const activeAccountId = ref<string | null>(null)
   const selectedCourseIds = ref<Set<string>>(new Set())
   const loadedAccountIds = ref<Set<string>>(new Set())
+  const scannedAccountIds = ref<Set<string>>(new Set())
   const loadingAccountIds = ref<Set<string>>(new Set())
   const scanningAccountIds = ref<Set<string>>(new Set())
   const error = ref<string | null>(null)
@@ -55,6 +56,10 @@ export const useCourseStore = defineStore('course', () => {
       [accountId]: courses,
     }
     addToSet(loadedAccountIds, accountId)
+    // Non-empty course data is positive evidence the account has been scanned.
+    if (courses.length > 0) {
+      addToSet(scannedAccountIds, accountId)
+    }
   }
 
   async function fetchCourses(accountId?: string): Promise<void> {
@@ -98,6 +103,9 @@ export const useCourseStore = defineStore('course', () => {
       try {
         const courses = await api.scanCourses(targetId ? [targetId] : undefined)
         setCoursesForAccount(targetId, courses)
+        // scanCourses re-reads the persisted discovery state — a successful
+        // read (even when empty) means the account has been scanned already.
+        addToSet(scannedAccountIds, targetId)
       } catch (e: any) {
         error.value = e?.message ?? 'Failed to scan courses'
       } finally {
@@ -153,11 +161,20 @@ export const useCourseStore = defineStore('course', () => {
     return loadedAccountIds.value.has(accountId)
   }
 
+  /** 账号是否已经扫描过：本会话内成功读取过发现文件，或已存在课程数据。 */
+  function isAccountScanned(accountId: string): boolean {
+    return (
+      scannedAccountIds.value.has(accountId) ||
+      (coursesByAccount.value[accountId]?.length ?? 0) > 0
+    )
+  }
+
   return {
     coursesByAccount,
     activeAccountId,
     selectedCourseIds,
     loadedAccountIds,
+    scannedAccountIds,
     loadingAccountIds,
     scanningAccountIds,
     loading,
@@ -177,5 +194,6 @@ export const useCourseStore = defineStore('course', () => {
     addSelectedCourses,
     removeSelectedCourses,
     hasLoadedAccount,
+    isAccountScanned,
   }
 })

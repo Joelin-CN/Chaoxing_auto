@@ -130,7 +130,10 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  pythonPath: 'python',
+  // Recommended interpreter: the dedicated conda env with volcengine-python-sdk
+  // installed (created for the balance query). Overridable via a custom
+  // Settings.pythonPath or the CHAOXING_BALANCE_PYTHON environment variable.
+  pythonPath: 'E:\\Softwares\\Anaconda\\envs\\chaoxing-backend\\python.exe',
   maxWorkers: 2,
   headless: true,
   browserTimeout: 30000,

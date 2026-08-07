@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events'
 import { spawn, ChildProcess } from 'child_process'
-import { CODE_DIR, WORKSPACE_DIR } from '../backendPath'
+import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
 import { getCurrentSettings } from '../ipc/status.handler'
 import type {
   PythonBridgeEvent,
@@ -42,6 +42,10 @@ const CHROMIUM_MEMORY_FLAGS = [
   '--disable-software-rasterizer',
 ]
 
+/** Upper bound for buffered stdout (bytes). A misbehaving backend that floods
+ *  output without line breaks would otherwise grow `buffer` without limit. */
+const MAX_STDOUT_BUFFER_BYTES = 1_000_000
+
 // ----------------------------------------------------------------
 // Type guards
 // ----------------------------------------------------------------
@@ -80,12 +84,15 @@ export class PythonBridge extends EventEmitter {
   private killTimer1: NodeJS.Timeout | null = null
   private killTimer2: NodeJS.Timeout | null = null
   private safetyTimer: NodeJS.Timeout | null = null
+  private bufferTruncated = false
 
   // ================================================================
   // Real process
   // ================================================================
 
   start(args: string[]): void {
+    this.buffer = ''
+    this.bufferTruncated = false
     // Canonical backend entry is the JSON-line protocol module
     // `python -m chaoxing.api` (NOT the legacy scripts/ shim, which does not
     // speak the protocol). It must run with cwd = backend root so the
@@ -98,7 +105,7 @@ export class PythonBridge extends EventEmitter {
       'PATH', 'SYSTEMROOT', 'SYSTEMDRIVE', 'TEMP', 'TMP',
       'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
       'PYTHONPATH', 'PYTHONHOME',
-      'CHAOXING_WORKSPACE', 'CHAOXING_HEADED',
+      'CHAOXING_WORKSPACE', 'CHAOXING_DATA_DIR', 'CHAOXING_HEADED',
     ]
     const safeEnv: Record<string, string> = { PYTHONUNBUFFERED: '1' }
     for (const key of ALLOWED_ENV) {
@@ -111,6 +118,7 @@ export class PythonBridge extends EventEmitter {
     // temp/ logs/ resolve there, not next to the read-only code. An explicit env
     // value (e.g. for a relocated workspace) still wins.
     safeEnv.CHAOXING_WORKSPACE = process.env.CHAOXING_WORKSPACE ?? WORKSPACE_DIR
+    safeEnv.CHAOXING_DATA_DIR = process.env.CHAOXING_DATA_DIR ?? DATA_DIR
 
     // Honor the user's headless setting. The backend reads CHAOXING_HEADED ("1"
     // launches a visible browser); headless:true (the default) leaves it "0".
@@ -145,6 +153,22 @@ export class PythonBridge extends EventEmitter {
 
     this.process.stdout?.on('data', (chunk: Buffer) => {
       this.buffer += chunk.toString('utf-8')
+      // Hard cap: if the backend floods stdout without line breaks, drop the
+      // head so the buffer cannot grow without bound. One warning per process
+      // lifetime keeps the log from being spammed.
+      if (this.buffer.length > MAX_STDOUT_BUFFER_BYTES) {
+        this.buffer = this.buffer.slice(-MAX_STDOUT_BUFFER_BYTES)
+        if (!this.bufferTruncated) {
+          this.bufferTruncated = true
+          this.emit('log', {
+            type: 'LOG',
+            jobId: 'main',
+            level: 'error',
+            message: `[pythonBridge] stdout buffer exceeded ${MAX_STDOUT_BUFFER_BYTES} bytes; head dropped`,
+            timestamp: new Date().toISOString(),
+          })
+        }
+      }
       this.flushBuffer()
     })
 
@@ -179,6 +203,19 @@ export class PythonBridge extends EventEmitter {
         error: `Python process error: ${err.message}`,
         stack: err.stack,
       })
+      // A spawn failure (e.g. ENOENT for the configured interpreter) is
+      // terminal: no 'exit' event is guaranteed, so clean up timers and the
+      // process reference here and let listeners observe the bridge going
+      // away. job.handler treats 'exit' as the release point for
+      // activeJobId/bridge; the already-emitted ERROR message is preserved
+      // because the job status has already been set to 'error'.
+      this.clearKillTimers()
+      if (this.safetyTimer) {
+        clearTimeout(this.safetyTimer)
+        this.safetyTimer = null
+      }
+      this.process = null
+      this.emit('exit', null)
     })
   }
 

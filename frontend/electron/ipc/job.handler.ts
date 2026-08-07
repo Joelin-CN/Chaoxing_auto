@@ -15,6 +15,9 @@ const MAX_ACCOUNTS = 50
 const RATE_LIMIT_COOLDOWN_MS = 500
 const CHROMIUM_RAM_PER_ACCOUNT_MB = 350
 const MAX_RAM_USAGE_RATIO = 0.7
+/** Keep at most this many finished jobs in memory; older entries are dropped
+ *  so the jobs map cannot grow without bound over a long-running session. */
+const MAX_RETAINED_JOBS = 20
 
 const jobs = new Map<string, JobStatus>()
 
@@ -34,6 +37,16 @@ function checkRateLimit(key: string): void {
 
 function generateJobId(): string {
   return `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function retainJob(jobId: string, job: JobStatus): void {
+  jobs.set(jobId, job)
+  // Map preserves insertion order — drop the oldest entries first.
+  while (jobs.size > MAX_RETAINED_JOBS) {
+    const oldest = jobs.keys().next().value
+    if (oldest === undefined) break
+    jobs.delete(oldest)
+  }
 }
 
 function cloneJob(job: JobStatus): JobStatus {
@@ -323,7 +336,9 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
 
   currentBridge.on('exit', (code) => {
     const job = jobs.get(jobId)
-    if (job && job.status !== 'completed' && job.status !== 'stopped') {
+    // If the bridge already reported a specific error (e.g. spawn ENOENT),
+    // keep that message — don't overwrite it with a generic exit line.
+    if (job && job.status !== 'completed' && job.status !== 'stopped' && job.status !== 'error') {
       job.status = 'error'
       job.phase = 'error'
       job.message = `Python process exited with code ${code}.`
@@ -379,7 +394,7 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
       lanes: createInitialLanes(accountIds),
     }
 
-    jobs.set(jobId, jobStatus)
+    retainJob(jobId, jobStatus)
     activeJobId = jobId
     bridge = createBridgeAndBind(win, jobId)
 

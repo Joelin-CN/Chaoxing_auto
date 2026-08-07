@@ -264,7 +264,7 @@ export interface ChaoxingApi {
     action?: 'skip'
   }): Promise<void>
   /** Query the Volcengine (Doubao) cash balance. Decoupled from the job stream;
-   *  spawns the Anaconda interpreter on the Electron side. */
+   *  spawns the chaoxing-backend interpreter on the Electron side. */
   getBalance(): Promise<Balance>
   /** Live system resources (RAM/CPU/uptime) for the dashboard panel. */
   getSystemResources(): Promise<SystemResources>

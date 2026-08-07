@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { spawn } from 'child_process'
-import { CODE_DIR, WORKSPACE_DIR } from '../backendPath'
+import fs from 'fs'
+import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
 import { getCurrentSettings } from './status.handler'
 import type { BalanceResult } from '../types'
 import { IPC_CHANNELS } from '../types'
@@ -18,16 +19,45 @@ import { IPC_CHANNELS } from '../types'
  * interpreter lacks the SDK, set CHAOXING_BALANCE_PYTHON to one that has it
  * (e.g. an Anaconda python). Resolution order:
  *   1. CHAOXING_BALANCE_PYTHON env (explicit override).
- *   2. The configured task interpreter (Settings.pythonPath).
+ *   2. The configured task interpreter (Settings.pythonPath; defaults to the
+ *      dedicated conda env that ships volcengine-python-sdk).
  *   3. 'python' on PATH.
  */
 
 /** Interpreter for the balance query (must have volcengine-python-sdk). */
 function getBalancePython(): string {
+  const envOverride = process.env.CHAOXING_BALANCE_PYTHON
+  if (envOverride) {
+    console.log(`[balance] balance query interpreter (env override): ${envOverride}`)
+    return envOverride
+  }
+
+  const configured = getCurrentSettings().pythonPath
+  if (configured) {
+    // A stale absolute path left in settings.json (e.g. a system Python without
+    // the SDK) would fail at spawn with ENOENT. Skip it so we fall back to
+    // something launchable instead of failing before even trying.
+    if (!isPathLike(configured) || fs.existsSync(configured)) {
+      console.log(`[balance] balance query interpreter (settings): ${configured}`)
+      return configured
+    }
+    console.warn(
+      `[balance] configured interpreter "${configured}" does not exist; ` +
+        "falling back to 'python' on PATH",
+    )
+  }
+
+  console.log('[balance] balance query interpreter (fallback): python')
+  return 'python'
+}
+
+/** Rough check for an explicit path (as opposed to a bare command name). */
+function isPathLike(value: string): boolean {
   return (
-    process.env.CHAOXING_BALANCE_PYTHON ||
-    getCurrentSettings().pythonPath ||
-    'python'
+    value.includes('/') ||
+    value.includes('\\') ||
+    /^[A-Za-z]:/.test(value) ||
+    value.toLowerCase().endsWith('.exe')
   )
 }
 
@@ -50,7 +80,7 @@ function runBalanceQuery(): Promise<BalanceResult> {
       'PATH', 'SYSTEMROOT', 'SYSTEMDRIVE', 'TEMP', 'TMP',
       'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
       'PYTHONPATH', 'PYTHONHOME',
-      'CHAOXING_WORKSPACE',
+      'CHAOXING_WORKSPACE', 'CHAOXING_DATA_DIR',
     ]
     const safeEnv: Record<string, string> = { PYTHONUNBUFFERED: '1' }
     for (const key of ALLOWED_ENV) {
@@ -58,9 +88,10 @@ function runBalanceQuery(): Promise<BalanceResult> {
         safeEnv[key] = process.env[key]!
       }
     }
-    // Pin workspace to the writable runtime root (see docs/INTEGRATION.md §4),
+    // Pin workspace to the writable runtime root (see docs/design/integration.md §4),
     // so volc_billing.txt and config resolve there regardless of launch cwd.
     safeEnv.CHAOXING_WORKSPACE = process.env.CHAOXING_WORKSPACE ?? WORKSPACE_DIR
+    safeEnv.CHAOXING_DATA_DIR = process.env.CHAOXING_DATA_DIR ?? DATA_DIR
 
     let child
     try {

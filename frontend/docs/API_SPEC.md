@@ -1,6 +1,6 @@
 # API 接口文档（前端本地速查）
 
-> **权威来源**：完整契约、类型映射、安全与错误处理见 **[../../docs/api/FRONTEND_BACKEND_API.md](../../docs/api/FRONTEND_BACKEND_API.md)**。本文件是前端本地的精简速查，与代码 (`electron/types.ts`、`electron/python/pythonBridge.ts`) 对齐。
+> **权威来源**：完整契约、类型映射、安全与错误处理见 **[../../docs/design/api.md](../../docs/design/api.md)**。本文件是前端本地的精简速查，与代码 (`electron/types.ts`、`electron/python/pythonBridge.ts`) 对齐。
 
 接口分两类：**请求-响应（invoke）通道**（16 个 + 2 个 backend-settings 别名）和 **实时推送事件**（7 种）。
 

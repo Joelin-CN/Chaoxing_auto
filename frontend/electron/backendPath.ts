@@ -20,7 +20,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
  *   WORKSPACE_DIR The directory the backend reads/writes at runtime — config,
  *                 passwords/, output/, temp/, logs/, scripts/ (captcha images),
  *                 chrome-profiles/, chrome-cache/. Passed to the backend as
- *                 CHAOXING_WORKSPACE (see docs/INTEGRATION.md §4). In a packaged
+ *                 CHAOXING_WORKSPACE (see docs/design/integration.md §4). In a packaged
  *                 build this lives under the user's writable userData dir; in
  *                 dev it is the same as CODE_DIR (the backend subtree itself).
  *
@@ -84,6 +84,21 @@ function resolveWorkspaceDir(): string {
 export const WORKSPACE_DIR = resolveWorkspaceDir()
 
 /**
+ * Writable runtime data root (CHAOXING_DATA_DIR). Holds credentials, browser
+ * profiles, logs, screenshots, output and temp artifacts.
+ *   - dev:      `<repo>/data` (next to the backend subtree)
+ *   - packaged: `<userData>/data` (WORKSPACE_DIR is `<userData>/workspace`)
+ * An explicit `CHAOXING_DATA_DIR` env value always wins.
+ */
+function resolveDataDir(): string {
+  const override = process.env.CHAOXING_DATA_DIR
+  if (override) return path.resolve(override)
+  return path.resolve(WORKSPACE_DIR, '../data')
+}
+
+export const DATA_DIR = resolveDataDir()
+
+/**
  * Backward-compatible alias. Historically a single `BACKEND_DIR` served as both
  * cwd and workspace; now it maps to CODE_DIR. New code should import CODE_DIR /
  * WORKSPACE_DIR explicitly.
@@ -99,6 +114,12 @@ const SEED_SCRIPT_ASSETS = ['_table.json', '_decrypt_font.js', '_v17_section_pla
 /** Directories the backend writes into; created empty so first run never trips
  *  on a missing dir. `scripts/` is writable too (captcha images, see §4.2). */
 const SEED_EMPTY_DIRS = ['passwords', 'output', 'temp', 'logs', 'scripts']
+
+/** Runtime data subdirectories under DATA_DIR, seeded on first launch. */
+const SEED_DATA_DIRS = [
+  'passwords', 'output', 'temp', 'logs', 'screenshots', 'chrome-profiles',
+  'documents',
+]
 
 function copyIfAbsent(src: string, dest: string): void {
   if (fs.existsSync(dest)) return
@@ -121,9 +142,14 @@ export function ensureWorkspaceSeeded(): void {
   if (WORKSPACE_DIR === CODE_DIR) return // dev: nothing to seed
 
   fs.mkdirSync(WORKSPACE_DIR, { recursive: true })
+  fs.mkdirSync(DATA_DIR, { recursive: true })
 
   for (const dir of SEED_EMPTY_DIRS) {
     fs.mkdirSync(path.join(WORKSPACE_DIR, dir), { recursive: true })
+  }
+
+  for (const dir of SEED_DATA_DIRS) {
+    fs.mkdirSync(path.join(DATA_DIR, dir), { recursive: true })
   }
 
   copyIfAbsent(

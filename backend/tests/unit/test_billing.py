@@ -52,6 +52,19 @@ class TestLoadBillingCredentials:
         assert creds["access_key"] == "AKbare"
         assert creds["secret_key"] == "SKbare"
 
+    def test_parses_gbk_encoded_file(self, tmp_path):
+        # Chinese Windows editors commonly save plain text as ANSI/GBK; the
+        # loader must tolerate that, not just UTF-8.
+        f = tmp_path / "volc_billing.txt"
+        f.write_text(
+            'VOLC_ACCESS_KEY="AKgbk123"\nVOLC_SECRET_KEY="SKgbk456"\n',
+            encoding="gbk",
+        )
+        with patch.object(billing, "CREDS_FILE", f):
+            creds = billing._load_billing_credentials()
+        assert creds["access_key"] == "AKgbk123"
+        assert creds["secret_key"] == "SKgbk456"
+
     def test_region_defaults_when_absent(self, tmp_path):
         f = self._write_creds(tmp_path,
             'VOLC_ACCESS_KEY=AK\nVOLC_SECRET_KEY=SK\n')
@@ -150,7 +163,7 @@ class TestQueryBalance:
         core_mod.Configuration.set_default.assert_called_once_with(cfg)
         api_instance.query_balance_acct.assert_called_once()
 
-    def test_missing_sdk_raises_aibackend_error_mentioning_anaconda(self):
+    def test_missing_sdk_raises_aibackend_error_mentioning_conda_env(self):
         creds = {"access_key": "AK", "secret_key": "SK", "region": "cn-north-1"}
 
         # Force the lazy import to fail as if the SDK weren't installed.
@@ -168,7 +181,7 @@ class TestQueryBalance:
 
         assert exc.value.provider == "volc-billing"
         assert exc.value.retryable is False
-        assert "Anaconda" in str(exc.value)
+        assert "chaoxing-backend" in str(exc.value)
 
     def test_api_failure_raises_aibackend_error(self):
         core_mod, billing_mod, api_instance = _make_fake_sdk(_fake_response())

@@ -18,16 +18,14 @@ import re
 import json
 import os
 import base64
-from pathlib import Path
 from typing import Optional
 
 from ._base import AISolver
 from ..exceptions import AIBackendError
 from ..logging_setup import log
+from ..constants import CREDS_DIR
 
-WORKSPACE = Path(os.environ.get("CHAOXING_WORKSPACE",
-    str(Path(__file__).parent.parent.parent)))
-CREDS_FILE = WORKSPACE / "passwords" / "doubao.txt"
+CREDS_FILE = CREDS_DIR / "doubao.txt"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -46,7 +44,7 @@ def _load_credentials() -> dict:
     if not CREDS_FILE.exists():
         raise FileNotFoundError(
             f"Doubao credentials not found: {CREDS_FILE}\n"
-            f"Create passwords/doubao.txt with ARK_API_KEY and model."
+            f"Create data/passwords/doubao.txt with ARK_API_KEY and model."
         )
 
     content = CREDS_FILE.read_text(encoding="utf-8")

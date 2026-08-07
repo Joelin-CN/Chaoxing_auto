@@ -16,7 +16,7 @@ from pathlib import Path
 
 import threading
 
-from ..constants import WORKSPACE, TMP_DIR
+from ..constants import WORKSPACE, TMP_DIR, CREDS_DIR, CHROME_PROFILES_DIR
 from ..config import cfg
 from ..session import _get_active_session
 from ..logging_setup import log
@@ -96,7 +96,7 @@ def read_all_chaoxing_credentials() -> list[dict]:
         if _ALL_CREDS_CACHE is not None:
             return list(_ALL_CREDS_CACHE)
 
-        cred_file = WORKSPACE / "passwords" / "chaoxing.txt"
+        cred_file = CREDS_DIR / "chaoxing.txt"
         if not cred_file.exists():
             log(f"Credential file not found: {cred_file}", "ERROR")
             _ALL_CREDS_CACHE = []
@@ -247,10 +247,10 @@ def ensure_chaoxing_browser(account_index: int = 0) -> bool:
             "&refer=https%3A%2F%2Fi.chaoxing.com"
         )
 
-    # Keep the Chrome profile under the workspace so a packaged (read-only)
-    # install still writes to a per-user location, and (per project decision)
-    # so it lives on the E: drive instead of C:. CHAOXING_WORKSPACE controls
-    # the root; in dev it is the backend subtree, when packaged it is userData.
+    # Keep the Chrome profile under the writable data root so a packaged
+    # (read-only) install still writes to a per-user location. CHAOXING_DATA_DIR
+    # controls the root; in dev it is the repo-level data/ directory, when
+    # packaged it is userData/data.
     #
     # NOTE: playwright-cli's `open` only accepts --browser/--config/--headed/
     # --persistent/--profile. It has NO --user-data-dir, --disk-cache-dir, or
@@ -260,7 +260,7 @@ def ensure_chaoxing_browser(account_index: int = 0) -> bool:
     # 无头 toggle and the E:-drive profile both appeared to do nothing. The
     # persistent profile dir is passed via --profile; --disable-gpu / cache-dir
     # are not expressible here and are dropped.
-    profile_dir = str(WORKSPACE / "chrome-profiles" / f"account-{account_index}")
+    profile_dir = str(CHROME_PROFILES_DIR / f"account-{account_index}")
 
     cmd = [
         cli, f"-s={session}", "open", "--browser=chrome", "--persistent",

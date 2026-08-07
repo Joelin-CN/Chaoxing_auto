@@ -12,9 +12,11 @@ Emits exactly ONE line of JSON to stdout for the frontend to consume:
 
 This command is fully independent of ``chaoxing.api`` — it does NOT touch the
 job argparse (--job-id/--accounts/--mode). It must be launched under an
-interpreter that has volcengine-python-sdk installed (e.g. Anaconda):
+interpreter that has volcengine-python-sdk installed (e.g. the dedicated conda
+env ``chaoxing-backend``):
 
-    E:/Softwares/Anaconda/python.exe -m chaoxing.balance
+    conda activate chaoxing-backend
+    python -m chaoxing.balance
 
 All debug/diagnostic output goes to stderr; stdout is strictly one JSON line.
 """

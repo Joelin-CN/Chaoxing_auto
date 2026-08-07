@@ -20,10 +20,21 @@ if sys.platform == "win32":
 
 # ── Paths ──────────────────────────────────────────────────────
 WORKSPACE = Path(os.environ.get("CHAOXING_WORKSPACE", str(Path(__file__).parent.parent)))
-SCRIPT_DIR = WORKSPACE / "scripts"
+
+# Runtime data root. In dev this is the repo-level data/ directory next to the
+# backend subtree; when packaged (CHAOXING_WORKSPACE -> userData/workspace) it
+# resolves to userData/data. An explicit CHAOXING_DATA_DIR always wins.
+DATA_ROOT = Path(os.environ.get("CHAOXING_DATA_DIR", str(WORKSPACE.parent / "data")))
+
+SCRIPT_DIR = WORKSPACE / "scripts"      # Read-only JS assets (font decrypt, player)
 CONFIG_PATH = WORKSPACE / "chaoxing_config.json"   # Project root (moved out of scripts/)
-OUTPUT_DIR = WORKSPACE / "output"       # Runtime output (progress, discovered courses)
-TMP_DIR = WORKSPACE / "temp"            # Temporary files (JS scripts, screenshots)
+OUTPUT_DIR = DATA_ROOT / "output"       # Runtime output (progress, discovered courses)
+TMP_DIR = DATA_ROOT / "temp"            # Temporary files (JS scripts, screenshots)
+LOG_DIR = DATA_ROOT / "logs"            # Daily logs + error logs
+SCREENSHOTS_DIR = DATA_ROOT / "screenshots"  # Manual/debug screenshots
+CHROME_PROFILES_DIR = DATA_ROOT / "chrome-profiles"  # Persistent browser profiles
+CREDS_DIR = DATA_ROOT / "passwords"     # Credential files (never committed)
+DOCUMENTS_DIR = DATA_ROOT / "documents" # Personal reference documents
 
 # ── Package data paths (JS injection files, font tables) ─────
 PACKAGE_DIR = Path(__file__).parent

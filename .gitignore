@@ -59,8 +59,8 @@ Desktop.ini
 #  Internal dev notes — NOT for the public repo. These contain real
 #  course ids, masked phone numbers, and account details from local
 #  development. Kept on disk for continuity, excluded from git.
-#  Public-facing docs (README, docs/INTEGRATION.md, docs/api/,
-#  docs/reference/) are committed.
+#  Public-facing docs (README, docs/design/, docs/changelog/CHANGELOG.md,
+#  docs/reports/) are committed.
 # ═══════════════════════════════════════════════════════════════
 docs/handoffs/
 docs/sessions/
@@ -68,3 +68,15 @@ docs/changelogs/
 docs/superpowers/
 docs/prototypes/
 docs/MEMORY.md
+
+# ---- Monorepo normalization (2026-08-07) ----
+data/*
+!data/README.md
+documents/
+references/*
+!references/README.md
+backend/chaoxing_config.json
+backend/.claude/plans/
+backend/etc/
+backend/documents/
+backend/chaoxing/solvers/quiz/tmp*.js

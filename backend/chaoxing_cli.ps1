@@ -28,8 +28,18 @@ param(
 # ── Path Setup ──────────────────────────────────────────────────
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $env:CHAOXING_WORKSPACE = $ScriptRoot
+$env:CHAOXING_DATA_DIR = Join-Path (Split-Path $ScriptRoot -Parent) "data"
 $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONUTF8 = "1"
+
+# Interpreter resolution: CHAOXING_PYTHON env > conda env chaoxing-backend
+# (has volcengine-python-sdk for the balance query) > python on PATH.
+function Resolve-PythonExe {
+    if ($env:CHAOXING_PYTHON -and (Test-Path $env:CHAOXING_PYTHON)) { return $env:CHAOXING_PYTHON }
+    $condaEnv = "E:\Softwares\Anaconda\envs\chaoxing-backend\python.exe"
+    if (Test-Path $condaEnv) { return $condaEnv }
+    return "python"
+}
 
 # ── Banner ──────────────────────────────────────────────────────
 function Show-Banner {
@@ -175,7 +185,7 @@ function Invoke-PythonScript {
     }
 
     $procInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $procInfo.FileName = "python"
+    $procInfo.FileName = Resolve-PythonExe
     $procInfo.Arguments = "`"$scriptPath`" $($Arguments -join ' ')"
     $procInfo.UseShellExecute = $false
     $procInfo.RedirectStandardOutput = $true

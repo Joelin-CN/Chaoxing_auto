@@ -135,7 +135,7 @@ class ChapterQuizSolver:
         """
         _tf = _tf2.NamedTemporaryFile(
             mode="w", suffix=".js", delete=False,
-            dir=os.path.dirname(os.path.abspath(__file__)), encoding="utf-8"
+            dir=str(TMP_DIR), encoding="utf-8"
         )
         try:
             _tf.write(js_click_chapter)
@@ -179,7 +179,7 @@ class ChapterQuizSolver:
         """
         nav_file = _tf.NamedTemporaryFile(
             mode="w", suffix=".js", delete=False,
-            dir=os.path.dirname(os.path.abspath(__file__)), encoding="utf-8"
+            dir=str(TMP_DIR), encoding="utf-8"
         )
         try:
             nav_file.write(js)
@@ -566,8 +566,9 @@ class ChapterQuizSolver:
 
         session2 = _get_active_session()
         sfx2 = f"_{session2}" if session2 and session2 != "chaoxing-chrome" else ""
+        TMP_DIR.mkdir(parents=True, exist_ok=True)
         screenshot_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
+            str(TMP_DIR),
             f'_quiz_screenshot{sfx2}.png'
         )
         try:
@@ -613,7 +614,7 @@ class ChapterQuizSolver:
         """
         js_file = _tempfile2.NamedTemporaryFile(
             mode="w", suffix=".js", delete=False,
-            dir=os.path.dirname(os.path.abspath(__file__)), encoding="utf-8"
+            dir=str(TMP_DIR), encoding="utf-8"
         )
         try:
             js_file.write(js)

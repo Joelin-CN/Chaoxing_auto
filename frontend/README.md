@@ -104,7 +104,7 @@ frontend/
     │   ├── job.handler.ts          # 任务 IPC（RAM 检查、限流、PythonBridge 绑定）
     │   ├── course.handler.ts       # 课程 IPC（当前返回 Mock 数据，TODO 接真后端）
     │   ├── status.handler.ts       # 账号/状态/设置/工单 IPC（当前 Mock）
-    │   └── balance.handler.ts      # 余额 IPC（spawn Anaconda 跑 chaoxing.balance，§4.7）
+    │   └── balance.handler.ts      # 余额 IPC（spawn chaoxing-backend 跑 chaoxing.balance，§4.7）
     └── python/
         └── pythonBridge.ts         # Python 子进程桥接（spawn、NDJSON 解析、生命周期）
 ```
@@ -147,7 +147,7 @@ CSS 自定义属性驱动，支持亮/暗双主题（设置 → 主题切换）�
 
 ## 前后端通信
 
-完整契约见 **[../docs/api/FRONTEND_BACKEND_API.md](../docs/api/FRONTEND_BACKEND_API.md)**，分三层：
+完整契约见 **[../docs/design/api.md](../docs/design/api.md)**，分三层：
 
 1. **Layer 1** — `ChaoxingApi` TypeScript 接口（Store 消费层，字符串 ID、UI 形态类型）
 2. **Layer 2** — Electron IPC 协议（Renderer ↔ Main，数字 ID、后端形态类型，16 个 invoke 通道 + 7 个事件通道）

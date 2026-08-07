@@ -15,7 +15,7 @@ import json
 import threading
 from pathlib import Path
 
-from chaoxing.constants import WORKSPACE, OUTPUT_DIR, SCRIPT_DIR, SHUTDOWN_FLAG, ACCOUNT_SEMAPHORE
+from chaoxing.constants import OUTPUT_DIR, SHUTDOWN_FLAG, ACCOUNT_SEMAPHORE
 from chaoxing.config import load_config
 from chaoxing.session import set_active_session, _get_active_session
 from chaoxing.logging_setup import log, progress, check_signals, log_exception, phase

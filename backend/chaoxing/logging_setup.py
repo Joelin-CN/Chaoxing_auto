@@ -15,7 +15,7 @@ import sys
 import threading
 from typing import Callable, Optional
 
-from chaoxing.constants import WORKSPACE, SHUTDOWN_FLAG
+from chaoxing.constants import LOG_DIR, SHUTDOWN_FLAG
 
 # Thread safety for multi-account file writes
 _log_lock = threading.Lock()
@@ -98,7 +98,7 @@ def log(msg: str, level: str = "INFO"):
 
     # Also write to daily log file
     try:
-        log_dir = WORKSPACE / "logs"
+        log_dir = LOG_DIR
         if not _log_dir_created:
             log_dir.mkdir(parents=True, exist_ok=True)
             _log_dir_created = True
@@ -147,7 +147,7 @@ def progress(account_index: int, step: str, current: int = 0, total: int = 0):
 
     # Also write to daily log
     try:
-        log_dir = WORKSPACE / "logs"
+        log_dir = LOG_DIR
         if not _log_dir_created:
             log_dir.mkdir(parents=True, exist_ok=True)
             _log_dir_created = True
@@ -186,7 +186,7 @@ def phase(phase_name: str):
 
     # Always trace to the daily log file (independent of protocol handler).
     try:
-        log_dir = WORKSPACE / "logs"
+        log_dir = LOG_DIR
         if not _log_dir_created:
             log_dir.mkdir(parents=True, exist_ok=True)
             _log_dir_created = True
@@ -226,7 +226,7 @@ def ticket(ticket_dict: dict):
     # Always trace to the daily log (without the base64 image, to avoid
     # flooding the file). Independent of whether a handler is registered.
     try:
-        log_dir = WORKSPACE / "logs"
+        log_dir = LOG_DIR
         if not _log_dir_created:
             log_dir.mkdir(parents=True, exist_ok=True)
             _log_dir_created = True
@@ -247,7 +247,7 @@ def ticket(ticket_dict: dict):
 def log_exception(context: str, exc: Exception = None):
     """Log a full exception with traceback to the daily error log.
 
-    Writes to ``WORKSPACE/logs/chaoxing_errors_YYYYMMDD.log`` with:
+    Writes to ``LOG_DIR/chaoxing_errors_YYYYMMDD.log`` with:
       - ISO 8601 UTC timestamp
       - Context string (e.g. account index, course name, thread name)
       - Exception type, message, and full traceback
@@ -291,7 +291,7 @@ def log_exception(context: str, exc: Exception = None):
 
     # Also write to daily error log file
     try:
-        log_dir = WORKSPACE / "logs"
+        log_dir = LOG_DIR
         if not _log_dir_created:
             log_dir.mkdir(parents=True, exist_ok=True)
             _log_dir_created = True

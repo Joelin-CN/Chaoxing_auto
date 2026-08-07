@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { spawn } from 'child_process'
-import { CODE_DIR, WORKSPACE_DIR } from '../backendPath'
+import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
 import { getCurrentSettings } from './status.handler'
 import type { Course, ScanCoursesPayload } from '../types'
 import { IPC_CHANNELS } from '../types'
@@ -54,7 +54,7 @@ function runCoursesQuery(accountIndex: number): Promise<Course[]> {
       'PATH', 'SYSTEMROOT', 'SYSTEMDRIVE', 'TEMP', 'TMP',
       'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
       'PYTHONPATH', 'PYTHONHOME',
-      'CHAOXING_WORKSPACE',
+      'CHAOXING_WORKSPACE', 'CHAOXING_DATA_DIR',
     ]
     const safeEnv: Record<string, string> = { PYTHONUNBUFFERED: '1' }
     for (const key of ALLOWED_ENV) {
@@ -63,8 +63,9 @@ function runCoursesQuery(accountIndex: number): Promise<Course[]> {
       }
     }
     // Pin workspace so output/discovered_courses_*.json resolves to the right
-    // tree regardless of launch cwd (see docs/INTEGRATION.md §4).
+    // tree regardless of launch cwd (see docs/design/integration.md §4).
     safeEnv.CHAOXING_WORKSPACE = process.env.CHAOXING_WORKSPACE ?? WORKSPACE_DIR
+    safeEnv.CHAOXING_DATA_DIR = process.env.CHAOXING_DATA_DIR ?? DATA_DIR
 
     let child
     try {
@@ -96,6 +97,7 @@ function runCoursesQuery(accountIndex: number): Promise<Course[]> {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      child.kill('SIGKILL')
       const hint =
         (err as NodeJS.ErrnoException).code === 'ENOENT'
           ? `找不到 Python 解释器：${pythonPath}。请检查设置中的 Python 路径。`

@@ -65,14 +65,14 @@ python -m chaoxing.api --job-id "job_004" --accounts "0,1,2" --mode full
 
 | 软件 | 用途 | 安装方式 |
 |------|------|----------|
-| **Python 3.10+** | 核心脚本运行 | [python.org](https://www.python.org/) |
+| **Python 3.10+** | 核心脚本运行 | 推荐 conda 环境 `chaoxing-backend`（已装全部依赖）；或 [python.org](https://www.python.org/) |
 | **Node.js + npm** | playwright-cli 运行环境 | [nodejs.org](https://nodejs.org/) |
 | **playwright-cli** | 浏览器自动化 | `npm install -g playwright-cli` |
 | **Google Chrome** | 浏览器内核 | [google.com/chrome](https://www.google.com/chrome/) |
 
 ### 凭证文件
 
-需要以下文件在 `passwords/` 目录下：
+需要以下文件在 `data/passwords/` 目录下（仓库根级 `data/`，git 忽略）：
 
 **`passwords/chaoxing.txt`** — 超星账号（支持多账户）：
 ```text
@@ -148,33 +148,26 @@ chaoxing.(xuexitong\
 ├── logs/                      # 运行日志 + 异常日志（按日滚动）
 │   ├── chaoxing_YYYYMMDD.log
 │   └── chaoxing_errors_YYYYMMDD.log
-├── passwords/                 # 凭证文件（勿提交 Git）
-├── FRONTEND_BACKEND_API.md    # ★ 前后端 IPC 协议手册（整合必读）
-├── docs/                      # 开发文档
-│   ├── reference/             # 长期参考文档
-│   │   ├── API_REFERENCE.md
-│   │   └── architecture-overview.md
-│   └── sessions/              # 会话日志 & Handoff 记录
 └── tests/                     # 测试套件
     └── unit/                  # 单元测试（536 pass / 541，5 个为预存无关失败）
 ```
 
 ### 路径架构说明
 
-所有运行时产物限定在项目根目录下，源码目录 `chaoxing/` 保持纯净（无运行时写入）：
+所有运行时产物统一落在仓库根级 `data/`（对齐 monorepo 规范），源码目录 `chaoxing/` 保持纯净（无运行时写入）。`CHAOXING_WORKSPACE`（backend 子树 / userData/workspace）负责代码定位与配置；`CHAOXING_DATA_DIR`（`<仓库>/data` / userData/data）负责全部运行产物：
 
 | 产物类型 | 目录 | 生命周期 |
 |---------|------|---------|
-| 进度状态 (JSON) | `output/` | 持久化（跨运行保留） |
-| 课程发现快照 (JSON) | `output/` | 下次 scan/full 前清除 |
-| 答题统计 (JSON) | `output/` | 持久化（累计记录，上限 200 条） |
-| 临时 JS 脚本 | `temp/` | `_run_js_file()` 自动清理 |
-| 题目截图 (PNG) | `temp/` | 答题完成后 finally 清理 |
-| 验证码截图 (PNG) | `temp/` | 用完即删 |
-| 运行日志 | `logs/` | 按日滚动追加 |
-| 异常日志 | `logs/` | 带 traceback，按日滚动（`chaoxing_errors_YYYYMMDD.log`） |
+| 进度状态 (JSON) | `data/output/` | 持久化（跨运行保留） |
+| 课程发现快照 (JSON) | `data/output/` | 下次 scan/full 前清除 |
+| 答题统计 (JSON) | `data/output/` | 持久化（累计记录，上限 200 条） |
+| 临时 JS 脚本 / 截图 | `data/temp/` | `_run_js_file()` / finally 自动清理 |
+| 验证码图片与答案 | `data/temp/` | 用完即删 |
+| 运行日志 / 异常日志 | `data/logs/` | 按日滚动追加（`chaoxing_YYYYMMDD.log` / `chaoxing_errors_YYYYMMDD.log`） |
+| 浏览器持久化档案 | `data/chrome-profiles/` | 登录态，跨运行保留（git 忽略） |
+| 凭证文件 | `data/passwords/` | 手动放置（git 忽略） |
 
-**环境变量 `CHAOXING_WORKSPACE`**：启动 Python 进程时自动设置为项目根路径。Python 侧优先读取此变量，回退到 `Path(__file__).parent.parent` 自检测。无需手动设置。
+**环境变量**：`CHAOXING_WORKSPACE`（代码/配置根，后端子树）与 `CHAOXING_DATA_DIR`（运行产物根，仓库级 `data/`）由 CLI / 前端启动时自动设置；Python 侧优先读取，回退到 `Path(__file__)` 自检测。无需手动设置。
 
 ---
 
@@ -184,7 +177,6 @@ chaoxing.(xuexitong\
 
 ```json
 {
-  "workspace_root": "E:/B306/web/chaoxing.(xuexitong",
   "session": "chaoxing-chrome",
   "playwright_cli": "playwright-cli.cmd",
   "ai": {
@@ -279,7 +271,7 @@ solve_quiz(section)
 
 ### API 接口文档
 
-详细的三层接口文档见 **[docs/reference/API_REFERENCE.md](docs/reference/API_REFERENCE.md)**，涵盖：
+详细的三层接口文档见 **[docs/design/reference/API_REFERENCE.md](docs/design/reference/API_REFERENCE.md)**，涵盖：
 
 | 章节 | 内容 |
 |------|------|

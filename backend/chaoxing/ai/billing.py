@@ -14,21 +14,19 @@ SDK: volcengine-python-sdk (>= 5.0.0). The import name is NOT ``volcengine`` —
 each cloud service lives under ``volcenginesdk<service>``. The billing service
 is ``volcenginesdkbilling``; core config/auth is ``volcenginesdkcore``.
 
-IMPORTANT — lazy import: the SDK is only installed in the Anaconda interpreter,
-NOT the system Python that runs the unit tests. The SDK is therefore imported
-*inside* ``query_balance()`` so this module imports cleanly under any
-interpreter (matching the lazy-import pattern in ``doubao.py``).
+IMPORTANT — lazy import: the SDK is only installed in the dedicated
+``chaoxing-backend`` conda environment, NOT in every interpreter that runs the
+unit tests. The SDK is therefore imported *inside* ``query_balance()`` so this
+module imports cleanly under any interpreter (matching the lazy-import pattern
+in ``doubao.py``).
 """
 
-import os
 import re
-from pathlib import Path
 
 from ..exceptions import ConfigError, AIBackendError
+from ..constants import CREDS_DIR
 
-WORKSPACE = Path(os.environ.get("CHAOXING_WORKSPACE",
-    str(Path(__file__).parent.parent.parent)))
-CREDS_FILE = WORKSPACE / "passwords" / "volc_billing.txt"
+CREDS_FILE = CREDS_DIR / "volc_billing.txt"
 
 DEFAULT_REGION = "cn-north-1"
 PROVIDER = "volc-billing"
@@ -57,11 +55,11 @@ def _load_billing_credentials() -> dict:
     if not CREDS_FILE.exists():
         raise ConfigError(
             f"Volcano billing credentials not found: {CREDS_FILE}\n"
-            f"Create passwords/volc_billing.txt with VOLC_ACCESS_KEY and "
-            f"VOLC_SECRET_KEY (see FRONTEND_BACKEND_API.md)."
+            f"Create data/passwords/volc_billing.txt with VOLC_ACCESS_KEY and "
+            f"VOLC_SECRET_KEY (see docs/design/api.md)."
         )
 
-    content = CREDS_FILE.read_text(encoding="utf-8")
+    content = _read_creds_file()
 
     def _extract(name: str) -> str:
         # Quoted form first (export KEY="..."), then bare form (KEY=value).
@@ -86,6 +84,23 @@ def _load_billing_credentials() -> dict:
         )
 
     return {"access_key": access_key, "secret_key": secret_key, "region": region}
+
+
+def _read_creds_file() -> str:
+    """Read the credentials file, tolerating UTF-8 or ANSI/GBK text.
+
+    Chinese Windows editors (e.g. Notepad) often save plain text files as
+    ANSI/GBK; decoding strictly as UTF-8 would fail or garble the values.
+    """
+    for encoding in ("utf-8", "gbk"):
+        try:
+            return CREDS_FILE.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    raise ConfigError(
+        f"Could not decode credentials file {CREDS_FILE} as UTF-8 or GBK. "
+        "Re-save it as plain ANSI/UTF-8 text."
+    )
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -121,8 +136,8 @@ def query_balance() -> dict:
         raise AIBackendError(
             "volcengine-python-sdk is not installed in this interpreter "
             f"({e.name}). The balance query must run under an interpreter that "
-            "has the SDK installed (e.g. Anaconda: "
-            "E:/Softwares/Anaconda/python.exe -m chaoxing.balance).",
+            "has the SDK installed (activate the dedicated conda env, e.g. "
+            "`conda activate chaoxing-backend && python -m chaoxing.balance`).",
             provider=PROVIDER,
             retryable=False,
         ) from e

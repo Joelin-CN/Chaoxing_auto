@@ -42,16 +42,41 @@ class TestPathConstants:
         assert cp.parent == constants.WORKSPACE
 
     def test_output_dir(self):
-        """OUTPUT_DIR should be WORKSPACE / 'output'."""
+        """OUTPUT_DIR should be DATA_ROOT / 'output'."""
         od = constants.OUTPUT_DIR
         assert isinstance(od, Path)
         assert od.name == "output"
 
     def test_tmp_dir(self):
-        """TMP_DIR should be WORKSPACE / 'temp'."""
+        """TMP_DIR should be DATA_ROOT / 'temp'."""
         td = constants.TMP_DIR
         assert isinstance(td, Path)
         assert td.name == "temp"
+
+    def test_log_dir(self):
+        """LOG_DIR should be DATA_ROOT / 'logs'."""
+        ld = constants.LOG_DIR
+        assert isinstance(ld, Path)
+        assert ld.name == "logs"
+
+    def test_creds_dir(self):
+        """CREDS_DIR should be DATA_ROOT / 'passwords'."""
+        cd = constants.CREDS_DIR
+        assert isinstance(cd, Path)
+        assert cd.name == "passwords"
+
+    def test_chrome_profiles_dir(self):
+        """CHROME_PROFILES_DIR should be DATA_ROOT / 'chrome-profiles'."""
+        pd = constants.CHROME_PROFILES_DIR
+        assert isinstance(pd, Path)
+        assert pd.name == "chrome-profiles"
+
+    def test_data_root(self):
+        """DATA_ROOT should be the parent of WORKSPACE plus /data."""
+        dr = constants.DATA_ROOT
+        assert isinstance(dr, Path)
+        assert dr.name == "data"
+        assert dr.parent == constants.WORKSPACE.parent
 
     def test_package_dir(self):
         """PACKAGE_DIR should be the chaoxing package directory."""
@@ -75,7 +100,10 @@ class TestPathConstants:
         """All path constants should be pathlib.Path instances."""
         path_constants = [
             constants.WORKSPACE, constants.SCRIPT_DIR, constants.CONFIG_PATH,
-            constants.OUTPUT_DIR, constants.TMP_DIR, constants.PACKAGE_DIR,
+            constants.DATA_ROOT, constants.OUTPUT_DIR, constants.TMP_DIR,
+            constants.LOG_DIR, constants.SCREENSHOTS_DIR,
+            constants.CHROME_PROFILES_DIR, constants.CREDS_DIR,
+            constants.DOCUMENTS_DIR, constants.PACKAGE_DIR,
             constants.JS_DIR, constants.DATA_DIR,
         ]
         for p in path_constants:
@@ -83,10 +111,14 @@ class TestPathConstants:
 
     def test_path_derivation_consistency(self):
         """Derived paths should be children of WORKSPACE or PACKAGE_DIR."""
-        # SCRIPT_DIR, OUTPUT_DIR, TMP_DIR are under WORKSPACE
+        # SCRIPT_DIR, CONFIG_PATH are under WORKSPACE
         assert str(constants.SCRIPT_DIR).startswith(str(constants.WORKSPACE))
-        assert str(constants.OUTPUT_DIR).startswith(str(constants.WORKSPACE))
-        assert str(constants.TMP_DIR).startswith(str(constants.WORKSPACE))
+        assert str(constants.CONFIG_PATH).startswith(str(constants.WORKSPACE))
+        # Runtime artifact dirs are under DATA_ROOT
+        for d in (constants.OUTPUT_DIR, constants.TMP_DIR, constants.LOG_DIR,
+                  constants.SCREENSHOTS_DIR, constants.CHROME_PROFILES_DIR,
+                  constants.CREDS_DIR, constants.DOCUMENTS_DIR):
+            assert str(d).startswith(str(constants.DATA_ROOT))
         # JS_DIR, DATA_DIR are under PACKAGE_DIR
         assert str(constants.JS_DIR).startswith(str(constants.PACKAGE_DIR))
         assert str(constants.DATA_DIR).startswith(str(constants.PACKAGE_DIR))
@@ -176,8 +208,9 @@ class TestModuleAttributes:
     def test_all_expected_attributes_exist(self):
         """Module should have all expected constant attributes."""
         expected = [
-            "WORKSPACE", "SCRIPT_DIR", "CONFIG_PATH", "OUTPUT_DIR", "TMP_DIR",
-            "PACKAGE_DIR", "JS_DIR", "DATA_DIR",
+            "WORKSPACE", "SCRIPT_DIR", "CONFIG_PATH", "DATA_ROOT", "OUTPUT_DIR",
+            "TMP_DIR", "LOG_DIR", "SCREENSHOTS_DIR", "CHROME_PROFILES_DIR",
+            "CREDS_DIR", "DOCUMENTS_DIR", "PACKAGE_DIR", "JS_DIR", "DATA_DIR",
             "MAX_CONCURRENT_ACCOUNTS", "ACCOUNT_SEMAPHORE", "SHUTDOWN_FLAG",
         ]
         for attr in expected:

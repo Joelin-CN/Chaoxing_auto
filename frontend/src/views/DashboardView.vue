@@ -41,12 +41,17 @@
         </div>
       </GlassmorphicCard>
 
-      <GlassmorphicCard class="stat-card" padding="16px 20px">
+      <GlassmorphicCard
+        class="stat-card"
+        :clickable="true"
+        padding="16px 20px"
+        @click="loadBalance"
+      >
         <div class="stat-card__inner">
           <span class="stat-icon stat-icon--accent">💳</span>
           <div>
             <div class="stat-value stat-value--accent">{{ balanceValue }}</div>
-            <div class="stat-label">{{ balanceLabel }}</div>
+            <div class="stat-label" :title="balanceError ?? undefined">{{ balanceLabel }}</div>
           </div>
         </div>
       </GlassmorphicCard>
@@ -169,7 +174,12 @@ const balanceValue = computed(() => {
 })
 
 const balanceLabel = computed(() => {
-  if (balanceError.value) return `余额查询失败：${balanceError.value}`
+  if (balanceError.value) {
+    // Keep the stat label short; the full reason is available as a hover
+    // tooltip and in the DevTools console.
+    const short = balanceError.value.split('\n')[0]
+    return `余额查询失败：${short.length > 30 ? `${short.slice(0, 30)}…` : short}`
+  }
   if (!balance.value) return 'API 可用余额'
   return `${balance.value.provider} 可用余额（现金 ¥ ${balance.value.cashBalance}）`
 })
@@ -181,6 +191,7 @@ async function loadBalance(): Promise<void> {
     balance.value = await api.getBalance()
   } catch (e: any) {
     balanceError.value = e?.message ?? '查询失败'
+    console.error('[balance] balance query failed:', e)
   } finally {
     balanceLoading.value = false
   }

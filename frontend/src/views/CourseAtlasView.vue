@@ -70,9 +70,9 @@
             {{ allCoursesSelected ? '取消全选' : '全选' }}
           </button>
           <span class="right-header__sep"></span>
-          <label class="dry-run-label">
+          <label class="dry-run-label" @click.prevent="dryRun = !dryRun">
             <span class="dry-run-label__text">模拟运行</span>
-            <Toggle :model-value="dryRun" @update:model-value="dryRun = $event" />
+            <Toggle :model-value="dryRun" @update:model-value="dryRun = $event" @click.stop />
           </label>
         </div>
       </div>
@@ -121,10 +121,16 @@
             <strong>{{ accountStore.selectedAccountIds.size }}</strong> 个账号
           </span>
           <div class="action-bar__buttons">
-            <button class="btn btn--outline" @click="startJob('course-scan')">仅扫描</button>
-            <button class="btn btn--primary" @click="startJob('full-auto')">全自动处理</button>
-            <button class="btn btn--outline" @click="startJob('batch-exec', { focus: 'quiz' })">仅刷题</button>
-            <button class="btn btn--outline" @click="startJob('batch-exec', { focus: 'content' })">仅内容</button>
+            <button
+              v-if="unscannedSelectedAccounts.length > 0"
+              class="btn btn--outline"
+              :disabled="executionStore.isRunning"
+              :title="`为 ${unscannedSelectedAccounts.length} 个尚未扫描的账号扫描课程`"
+              @click="scanUnscannedOnly"
+            >仅扫描</button>
+            <button class="btn btn--primary" :disabled="executionStore.isRunning" @click="startJob('full-auto')">全自动处理</button>
+            <button class="btn btn--outline" :disabled="executionStore.isRunning" @click="startJob('batch-exec', { focus: 'quiz' })">仅刷题</button>
+            <button class="btn btn--outline" :disabled="executionStore.isRunning" @click="startJob('batch-exec', { focus: 'content' })">仅内容</button>
           </div>
         </GlassmorphicCard>
       </footer>
@@ -204,6 +210,11 @@ const allCoursesSelected = computed(() => {
   return activeCourses.value.every((course) => courseStore.selectedCourseIds.has(course.id))
 })
 
+/** 所选账号中尚未被扫描（还没有课程数据）的账号。底部「仅扫描」只对它们有意义。 */
+const unscannedSelectedAccounts = computed(() =>
+  [...accountStore.selectedAccountIds].filter((id) => !courseStore.isAccountScanned(id)),
+)
+
 function courseCountForAccount(accountId: string): number {
   return (courseStore.coursesByAccount[accountId] ?? []).length
 }
@@ -260,13 +271,17 @@ async function startFullAuto(): Promise<void> {
   await startJob('full-auto')
 }
 
-async function startJob(mode: ModeType, extraOptions?: Record<string, unknown>): Promise<void> {
+async function startJob(
+  mode: ModeType,
+  extraOptions?: Record<string, unknown>,
+  accountOverride?: string[],
+): Promise<void> {
   const payload: StartJobPayload = {
     objective: 'catchup',
     strategy: 'balanced',
     mode,
     courses: [...courseStore.selectedCourseIds],
-    accounts: [...accountStore.selectedAccountIds],
+    accounts: accountOverride ?? [...accountStore.selectedAccountIds],
     options: {
       dryRun: dryRun.value,
       maxConcurrency: settingsStore.settings.maxConcurrency,
@@ -275,6 +290,11 @@ async function startJob(mode: ModeType, extraOptions?: Record<string, unknown>):
   }
   await executionStore.startJob(payload)
   router.push('/execution-studio')
+}
+
+/** 仅对尚未扫描的账号发起扫描；已扫描账号的课程已在列表中，无需重复扫描。 */
+async function scanUnscannedOnly(): Promise<void> {
+  await startJob('course-scan', undefined, unscannedSelectedAccounts.value)
 }
 
 watch(

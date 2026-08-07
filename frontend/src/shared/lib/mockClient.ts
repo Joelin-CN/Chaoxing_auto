@@ -221,8 +221,11 @@ export class MockApiClient implements ChaoxingApi {
         }
       }
     } else {
+      // Global pause must also hold back pending lanes. syncHandleStatus()
+      // treats `pending` as active, so leaving them pending would keep the job
+      // status `running` and the UI would never show the paused state.
       for (const lane of simulation.handle.lanes) {
-        if (lane.status === 'running') {
+        if (lane.status === 'running' || lane.status === 'pending') {
           lane.status = 'paused'
           lane.currentTask = 'Paused'
         }

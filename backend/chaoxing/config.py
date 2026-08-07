@@ -166,7 +166,6 @@ class ConfigManager:
         self._courses: list[CourseConfig] = []
         self.session: str = "chaoxing-chrome"
         self.playwright_cli: str = "playwright-cli.cmd"
-        self.workspace_root: str = ""
         self.chrome_args: list[str] = ["--disable-gpu", "--disable-software-rasterizer"]
         self.max_concurrent: int = 10
         self._load()
@@ -183,7 +182,6 @@ class ConfigManager:
 
         self.session = self._raw.get("session", "chaoxing-chrome")
         self.playwright_cli = self._raw.get("playwright_cli", "playwright-cli.cmd")
-        self.workspace_root = self._raw.get("workspace_root", "")
         self.chrome_args = self._raw.get("chrome_args", ["--disable-gpu", "--disable-software-rasterizer"])
         self.max_concurrent = self._raw.get("max_concurrent", 10)
 

@@ -27,10 +27,11 @@ def temp_workspace(tmp_path):
     workspace.mkdir()
     scripts_dir = workspace / "scripts"
     scripts_dir.mkdir()
-    output_dir = workspace / "output"
-    output_dir.mkdir()
-    temp_dir = workspace / "temp"
-    temp_dir.mkdir()
+    # Runtime artifacts live in <tmp_path>/data (DATA_ROOT = WORKSPACE.parent/data)
+    data_root = workspace.parent / "data"
+    for sub in ("output", "temp", "logs", "screenshots", "chrome-profiles",
+                "passwords", "documents"):
+        (data_root / sub).mkdir(parents=True, exist_ok=True)
 
     # Create minimal config
     config = {

@@ -36,7 +36,7 @@ def _session_suffix(session: str) -> str:
 def captcha_paths_for_session(session: str) -> tuple:
     """Return ``(captcha_img_path, captcha_answer_path)`` for a session name.
 
-    Both paths live under ``SCRIPT_DIR`` with the per-account suffix applied.
+    Both paths live under ``TMP_DIR`` with the per-account suffix applied.
     Used by check_anti_spider() (read side) to keep the image/answer file
     names consistent with the writer.
 
@@ -48,8 +48,8 @@ def captcha_paths_for_session(session: str) -> tuple:
         Tuple of (image PNG absolute path, answer TXT absolute path).
     """
     suffix = _session_suffix(session)
-    img = os.path.join(str(SCRIPT_DIR), f'_captcha_img{suffix}.png')
-    answer = os.path.join(str(SCRIPT_DIR), f'_captcha_answer{suffix}.txt')
+    img = os.path.join(str(TMP_DIR), f'_captcha_img{suffix}.png')
+    answer = os.path.join(str(TMP_DIR), f'_captcha_answer{suffix}.txt')
     return img, answer
 
 
