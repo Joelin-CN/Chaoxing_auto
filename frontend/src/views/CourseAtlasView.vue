@@ -128,7 +128,9 @@
               :title="`为 ${unscannedSelectedAccounts.length} 个尚未扫描的账号扫描课程`"
               @click="scanUnscannedOnly"
             >仅扫描</button>
-            <button class="btn btn--primary" :disabled="executionStore.isRunning" @click="startJob('full-auto')">全自动处理</button>
+            <button class="btn btn--primary" :disabled="executionStore.isRunning" @click="startJob('full-auto')">
+              按队列启动 {{ accountStore.selectedAccountIds.size }} 个账号 · 最多 {{ planMax }} 并发
+            </button>
             <button class="btn btn--outline" :disabled="executionStore.isRunning" @click="startJob('batch-exec', { focus: 'quiz' })">仅刷题</button>
             <button class="btn btn--outline" :disabled="executionStore.isRunning" @click="startJob('batch-exec', { focus: 'content' })">仅内容</button>
           </div>
@@ -151,6 +153,7 @@ import { useCampaignStore } from '@/app/stores/campaign.store'
 import { useCourseStore } from '@/app/stores/course.store'
 import { useExecutionStore } from '@/app/stores/execution.store'
 import { useSettingsStore } from '@/app/stores/settings.store'
+import { useMemoryStore } from '@/app/stores/memory.store'
 import type { AccountStatus, Course, ModeType, StartJobPayload } from '@/shared/lib/types'
 
 const router = useRouter()
@@ -159,9 +162,11 @@ const campaignStore = useCampaignStore()
 const courseStore = useCourseStore()
 const executionStore = useExecutionStore()
 const settingsStore = useSettingsStore()
+const memoryStore = useMemoryStore()
 
 const activeAccountId = ref<string | null>(null)
 const dryRun = ref(false)
+const planMax = computed(() => memoryStore.plan?.maxConcurrent ?? settingsStore.settings.concurrencyTarget ?? 8)
 
 function maskPhone(phone: string): string {
   if (phone.length <= 4) return phone

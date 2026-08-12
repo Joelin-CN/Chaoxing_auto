@@ -14,6 +14,7 @@ import { useAttentionStore } from '@/app/stores/attention.store'
 import { useLogStore } from '@/app/stores/log.store'
 import { useCaptchaStore } from '@/app/stores/captcha.store'
 import { useCourseStore } from '@/app/stores/course.store'
+import { useMemoryStore } from '@/app/stores/memory.store'
 
 const api = createApiClient()
 
@@ -129,6 +130,7 @@ export const useExecutionStore = defineStore('execution', () => {
   }
 
   function handleTerminalStatus(nextStatus: ExecutionStatus): void {
+    useMemoryStore().stop()
     status.value = nextStatus
     endTime.value = Date.now()
     stopTimer()
@@ -264,6 +266,7 @@ export const useExecutionStore = defineStore('execution', () => {
       const handle = await api.startJob(payload)
       jobId.value = handle.jobId
       mergeHandle(handle)
+      useMemoryStore().start()
       registerEventListeners()
       startTimer()
       startAllLaneTimers()
@@ -374,6 +377,7 @@ export const useExecutionStore = defineStore('execution', () => {
     if (!jobId.value) return
     const handle = await api.getJobStatus(jobId.value)
     mergeHandle(handle)
+    useMemoryStore().setPlan(handle.memoryPlan ?? null)
     if (handle.status === 'completed') handleTerminalStatus('completed')
     if (handle.status === 'stopped') handleTerminalStatus('stopped')
     if (handle.status === 'error') handleTerminalStatus('error')
@@ -409,6 +413,8 @@ export const useExecutionStore = defineStore('execution', () => {
   }
 
   function reset(): void {
+    useMemoryStore().stop()
+    useMemoryStore().setPlan(null)
     unregisterEventListeners()
     stopTimer()
     stopAllLaneTimers()

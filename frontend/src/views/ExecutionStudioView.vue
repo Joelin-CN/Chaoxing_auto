@@ -208,6 +208,7 @@ function laneVariant(status: string): 'accent' | 'ok' | 'warn' | 'gold' {
   if (status === 'error') return 'warn'
   if (status === 'running') return 'accent'
   if (status === 'paused') return 'gold'
+  if (status === 'queued') return 'gold'
   return 'gold'
 }
 
@@ -216,6 +217,7 @@ function laneChipVariant(status: string): 'accent' | 'ok' | 'warn' | 'gold' | 'm
   if (status === 'error') return 'warn'
   if (status === 'running') return 'accent'
   if (status === 'paused') return 'gold'
+  if (status === 'queued') return 'muted'
   return 'muted'
 }
 
@@ -226,6 +228,7 @@ function laneStatusLabel(status: string): string {
     case 'completed': return '完成'
     case 'error': return '异常'
     case 'paused': return '已暂停'
+    case 'queued': return '排队中'
     case 'stopped': return '已停止'
     default: return status
   }

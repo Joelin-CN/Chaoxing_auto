@@ -89,6 +89,7 @@
       <GlassmorphicPanel class="panel" padding="20px">
         <div class="panel__header">
           <span class="panel__title">系统资源</span>
+          <Chip v-if="mockMode" variant="warn" size="sm">模拟数据</Chip>
           <span class="panel__sub">运行时长 {{ uptime }}</span>
         </div>
         <div class="resource-item">
@@ -117,6 +118,12 @@
             <span>负载 {{ cpu.pct }}%</span>
           </div>
         </div>
+        <div class="resource-item">
+          <div class="resource-header">
+            <span class="resource-label">项目 Chrome 占用</span>
+            <span class="resource-val">{{ projectChromeText }}</span>
+          </div>
+        </div>
       </GlassmorphicPanel>
     </div>
 
@@ -143,20 +150,24 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import GlassmorphicCard from '@/shared/ui/GlassmorphicCard.vue'
 import GlassmorphicPanel from '@/shared/ui/GlassmorphicPanel.vue'
+import Chip from '@/shared/ui/Chip.vue'
 import { useAccountStore } from '@/app/stores/account.store'
 import { useAttentionStore } from '@/app/stores/attention.store'
 import { useCourseStore } from '@/app/stores/course.store'
 import { useExecutionStore } from '@/app/stores/execution.store'
+import { useMemoryStore } from '@/app/stores/memory.store'
 import { useLogStore } from '@/app/stores/log.store'
-import { createApiClient } from '@/shared/lib/apiClient'
+import { createApiClient, isMockMode } from '@/shared/lib/apiClient'
 import type { AccountStatus, Balance, SystemResources } from '@/shared/lib/types'
 
 const api = createApiClient()
+const mockMode = isMockMode()
 
 const accountStore = useAccountStore()
 const attentionStore = useAttentionStore()
 const courseStore = useCourseStore()
 const executionStore = useExecutionStore()
+const memoryStore = useMemoryStore()
 const logStore = useLogStore()
 
 const hoveredDot = ref<string | null>(null)
@@ -255,6 +266,10 @@ const resources = ref<SystemResources>({
   uptimeSeconds: 0,
 })
 const ram = computed(() => resources.value.ram)
+const projectChromeText = computed(() => {
+  if (memoryStore.latest) return `${memoryStore.latest.projectChromeGB.toFixed(2)} GB`
+  return mockMode ? '—（模拟）' : '—'
+})
 const cpu = computed(() => resources.value.cpu)
 const uptime = computed(() => {
   const s = resources.value.uptimeSeconds
