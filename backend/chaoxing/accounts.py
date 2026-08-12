@@ -10,7 +10,7 @@ Usage::
 
 Emits exactly ONE line of JSON to stdout:
 
-    list success: {"type":"ACCOUNTS","accounts":[{"index":0,"account":"..."}, ...]}
+    list success: {"type":"ACCOUNTS","accounts":[{"index":0,"account":"13800000000"}, ...]}
     mutation ok:  {"type":"ACCOUNTS_OK","action":"add|edit|remove","index":N,
                     "account":"..."}
     failure:      {"type":"ERROR","error":"<msg>","detail":"<type>"}  + exit 1
