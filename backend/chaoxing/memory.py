@@ -128,6 +128,10 @@ class MemoryMonitor(threading.Thread):
         with self._lock:
             self.active_count = max(0, count)
 
+    def adjust_active_count(self, delta: int) -> None:
+        with self._lock:
+            self.active_count = max(0, self.active_count + delta)
+
     def stop(self) -> None:
         self._stop.set()
 
