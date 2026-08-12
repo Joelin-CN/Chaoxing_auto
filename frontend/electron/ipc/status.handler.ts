@@ -3,6 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import type { AccountStatus, Settings, Ticket } from '../types'
 import { IPC_CHANNELS, DEFAULT_SETTINGS } from '../types'
+import { isJobActive } from './jobState'
 
 // ----------------------------------------------------------------
 // Settings persistence
@@ -96,6 +97,10 @@ export function registerStatusHandlers(): void {
 
   // ---- settings:set ----
   ipcMain.handle(IPC_CHANNELS.SETTINGS_SET, async (_event, partial: Partial<Settings>) => {
+    const lockedKeys = ['accountsFilePath', 'concurrencyTarget', 'perAccountEstimateGB']
+    if (isJobActive() && lockedKeys.some((k) => k in partial)) {
+      throw new Error('任务运行中不可修改该设置。')
+    }
     currentSettings = { ...currentSettings, ...partial }
     saveSettings(currentSettings)
   })

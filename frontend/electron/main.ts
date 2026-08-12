@@ -8,6 +8,7 @@ import { registerCourseHandlers } from './ipc/course.handler'
 import { registerBalanceHandlers } from './ipc/balance.handler'
 import { registerAccountsHandlers } from './ipc/accounts.handler'
 import { registerSystemHandlers } from './ipc/system.handler'
+import { registerDialogHandlers } from './ipc/dialog.handler'
 import { ensureWorkspaceSeeded } from './backendPath'
 
 // __dirname is not available in ES modules — reconstruct it
@@ -110,6 +111,7 @@ function registerAllHandlers(): void {
   registerBalanceHandlers()
   registerAccountsHandlers()
   registerSystemHandlers()
+  registerDialogHandlers(getMainWindow)
 }
 
 // ----------------------------------------------------------------

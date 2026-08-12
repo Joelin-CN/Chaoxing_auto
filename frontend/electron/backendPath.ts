@@ -157,6 +157,11 @@ export function ensureWorkspaceSeeded(): void {
     path.join(WORKSPACE_DIR, 'chaoxing_config.json'),
   )
 
+  copyIfAbsent(
+    path.join(CODE_DIR, '.playwright', 'cli.config.json'),
+    path.join(WORKSPACE_DIR, '.playwright', 'cli.config.json'),
+  )
+
   for (const asset of SEED_SCRIPT_ASSETS) {
     copyIfAbsent(
       path.join(CODE_DIR, 'scripts', asset),

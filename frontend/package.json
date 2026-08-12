@@ -9,7 +9,8 @@
     "build:web": "vite build",
     "build": "vite build && electron-builder",
     "preview": "vite preview",
-    "typecheck": "vue-tsc -p tsconfig.json --noEmit && vue-tsc -p tsconfig.node.json --noEmit"
+    "typecheck": "vue-tsc -p tsconfig.json --noEmit && vue-tsc -p tsconfig.node.json --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@vueuse/core": "^10.7.0",
@@ -25,7 +26,8 @@
     "vite": "^5.4.21",
     "vite-plugin-electron": "^0.28.0",
     "vite-plugin-electron-renderer": "^0.14.0",
-    "vue-tsc": "^2.2.0"
+    "vue-tsc": "^2.2.0",
+    "vitest": "^1.6.0"
   },
   "main": "dist-electron/main.js"
 }

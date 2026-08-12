@@ -56,7 +56,7 @@ export type JobPhase =
 
 export interface JobLaneStatus {
   accountId: number
-  status: 'pending' | 'running' | 'paused' | 'completed' | 'stopped' | 'error'
+  status: 'pending' | 'queued' | 'running' | 'paused' | 'completed' | 'stopped' | 'error'
   progress: number
   currentTask?: string
   currentPhase?: string
@@ -75,7 +75,32 @@ export interface JobStatus {
   courseIds?: string[]
   phaseIndex?: number
   lanes?: JobLaneStatus[]
+  memoryPlan?: MemoryPlan
 }
+
+export interface MemoryPlan {
+  totalGB: number
+  baselineGB: number
+  budgetGB: number
+  cpuCap: number
+  memMax: number
+  maxConcurrent: number
+  systemLimitGB: number
+  perAccountEstimateGB: number
+}
+
+export interface PythonMemoryEvent {
+  type: 'MEMORY'
+  jobId?: string
+  budgetGB: number
+  projectChromeGB: number
+  perAccountAvgGB: number
+  remainingCount: number
+  level: 'info' | 'critical'
+  message: string
+}
+
+export type MemoryEvent = PythonMemoryEvent
 
 export interface StartJobPayload {
   accountIds: number[]
@@ -127,6 +152,9 @@ export interface Settings {
   doubaoModel: string
   autoResolve: boolean
   logLevel: 'debug' | 'info' | 'warn' | 'error'
+  accountsFilePath: string
+  concurrencyTarget: number | null
+  perAccountEstimateGB: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -142,6 +170,9 @@ export const DEFAULT_SETTINGS: Settings = {
   doubaoModel: 'doubao-pro',
   autoResolve: true,
   logLevel: 'info',
+  accountsFilePath: '',
+  concurrencyTarget: null,
+  perAccountEstimateGB: 0.7,
 }
 
 export interface Ticket {
@@ -270,6 +301,13 @@ export const IPC_CHANNELS = {
   JOB_RESOLVE_TICKET: 'job:resolve-ticket',
   BALANCE_QUERY: 'balance:query',
   SYSTEM_RESOURCES: 'system:resources',
+  AI_STATUS: 'ai:status',
+  AI_SET: 'ai:set',
+  AI_TEST: 'ai:test',
+  ACCOUNTS_ADD: 'accounts:add',
+  ACCOUNTS_EDIT: 'accounts:edit',
+  ACCOUNTS_REMOVE: 'accounts:remove',
+  DIALOG_OPEN_FILE: 'dialog:open-file',
   ON_PROGRESS: 'on-progress',
   ON_PHASE_CHANGE: 'on-phase-change',
   ON_LOG: 'on-log',
@@ -277,6 +315,7 @@ export const IPC_CHANNELS = {
   ON_COMPLETED: 'on-completed',
   ON_ERROR: 'on-error',
   ON_RESULT: 'on-result',
+  ON_MEMORY: 'on-memory',
   BACKEND_SETTINGS_GET: 'backend-settings:get',
   BACKEND_SETTINGS_SET: 'backend-settings:set',
 } as const

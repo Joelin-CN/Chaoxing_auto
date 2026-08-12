@@ -19,6 +19,7 @@ import type {
   ResolveTicketPayload,
   BalanceResult,
   SystemResources,
+  PythonMemoryEvent,
 } from './types'
 import { IPC_CHANNELS } from './types'
 
@@ -42,6 +43,13 @@ export interface ElectronAPI {
   resolveCaptcha: (payload: ResolveTicketPayload) => Promise<void>
   getBalance: () => Promise<BalanceResult>
   getSystemResources: () => Promise<SystemResources>
+  getAiStatus: () => Promise<{ configured: boolean; model: string; keyTail: string }>
+  setAiConfig: (payload: { apiKey?: string; model: string }) => Promise<void>
+  testAi: () => Promise<{ ok: boolean; reason?: string; models?: number }>
+  addAccount: (payload: { account: string; password: string; website?: string }) => Promise<void>
+  editAccount: (payload: { index: number; password?: string; website?: string }) => Promise<void>
+  removeAccount: (payload: { index: number }) => Promise<void>
+  openFilePicker: () => Promise<string | null>
   onProgress: (cb: (event: PythonProgressEvent) => void) => () => void
   onPhaseChange: (cb: (event: PythonPhaseEvent) => void) => () => void
   onLog: (cb: (event: PythonLogEvent) => void) => () => void
@@ -49,6 +57,7 @@ export interface ElectronAPI {
   onCompleted: (cb: (event: PythonDoneEvent) => void) => () => void
   onError: (cb: (event: PythonErrorEvent) => void) => () => void
   onResult: (cb: (event: PythonResultEvent) => void) => () => void
+  onMemory: (cb: (event: PythonMemoryEvent) => void) => () => void
   removeAllListeners: (channel: string) => void
   getBackendSettings: () => Promise<Settings>
   setBackendSettings: (partial: Partial<Settings>) => Promise<void>
@@ -87,6 +96,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.JOB_RESOLVE_TICKET, payload),
   getBalance: () => ipcRenderer.invoke(IPC_CHANNELS.BALANCE_QUERY),
   getSystemResources: () => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_RESOURCES),
+  getAiStatus: () => ipcRenderer.invoke(IPC_CHANNELS.AI_STATUS),
+  setAiConfig: (payload: { apiKey?: string; model: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_SET, payload),
+  testAi: () => ipcRenderer.invoke(IPC_CHANNELS.AI_TEST),
+  addAccount: (payload: { account: string; password: string; website?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_ADD, payload),
+  editAccount: (payload: { index: number; password?: string; website?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_EDIT, payload),
+  removeAccount: (payload: { index: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_REMOVE, payload),
+  openFilePicker: () => ipcRenderer.invoke(IPC_CHANNELS.DIALOG_OPEN_FILE),
   onProgress: makeListener<PythonProgressEvent>(IPC_CHANNELS.ON_PROGRESS),
   onPhaseChange: makeListener<PythonPhaseEvent>(IPC_CHANNELS.ON_PHASE_CHANGE),
   onLog: makeListener<PythonLogEvent>(IPC_CHANNELS.ON_LOG),
@@ -94,6 +114,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onCompleted: makeListener<PythonDoneEvent>(IPC_CHANNELS.ON_COMPLETED),
   onError: makeListener<PythonErrorEvent>(IPC_CHANNELS.ON_ERROR),
   onResult: makeListener<PythonResultEvent>(IPC_CHANNELS.ON_RESULT),
+  onMemory: makeListener<PythonMemoryEvent>(IPC_CHANNELS.ON_MEMORY),
   removeAllListeners: (channel: string) => ipcRenderer.removeAllListeners(channel),
   getBackendSettings: () => ipcRenderer.invoke(IPC_CHANNELS.BACKEND_SETTINGS_GET),
   setBackendSettings: (partial: Partial<Settings>) => ipcRenderer.invoke(IPC_CHANNELS.BACKEND_SETTINGS_SET, partial),
