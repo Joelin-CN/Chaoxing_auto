@@ -477,3 +477,20 @@ chaoxing_cli.bat full-auto --course "概率论与数理统计"
 chaoxing_cli.bat batch-test --from 2.7
 chaoxing_cli.bat full-auto --all-accounts --headed
 ```
+
+---
+
+## 内存感知并发（2026-08-13）
+
+- **Electron 主进程**：`electron/memory/planner.ts` 在每次 `JOB_START` 前取样基线
+  （扣除遗留项目 Chrome 占用），计算内存预算与 CPU 保险值，把
+  `--max-concurrent/--budget-gb/--system-limit-gb/--per-account-estimate-gb`
+  传给 Python；运行时只消费后端 `MEMORY` 事件驱动仪表。
+- **Python 后端**：`chaoxing/memory.py` 提供预算公式、PowerShell CIM 采样与
+  `MemoryMonitor`；`orchestrator.run_multi_account` 用运行时信号量排队，每个账号
+  在打开 Chrome 前执行 `gate_open()` 预算闸门，超预算等待、绝不瞬时突破。
+- **凭据**：AI key 由主进程原子写 `data/passwords/doubao.txt`（`.bak` 备份、
+  写后读回校验，只回显尾号）；账号增删改由 `chaoxing.accounts` 子命令原子写
+  当前生效账号文件（`CHAOXING_ACCOUNTS_FILE` 可覆盖路径），显式编号防止档案错位。
+- **任务运行中**锁定所有写操作（AI 配置、账号、账号路径），由主进程 `jobState`
+  统一把关。

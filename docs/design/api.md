@@ -1586,3 +1586,44 @@ AttentionQueueView — 使用 3 个 Store: Attention, Campaign, Log
 所有其他 6 个 Store (Account, Course, Campaign, Settings, Attention, Log)
   — 无跨 Store 导入，仅被 executionStore 依赖
 ```
+
+---
+
+## 10. 2026-08-13：内存感知并发协议变更
+
+### 10.1 新 CLI 参数（`python -m chaoxing.api`）
+
+```text
+--max-concurrent INT            动态信号量大小（Electron 按内存/CPU 计划计算）
+--budget-gb FLOAT               项目内存预算（GB）
+--system-limit-gb FLOAT         系统已用内存急停阈值（基线+预算+1GB 余量）
+--per-account-estimate-gb FLOAT 初始单 Chrome 实例估算（默认 0.7GB）
+```
+
+`--chromium-flags` 已移除：省内存参数改由工作区 `backend/.playwright/cli.config.json`
+的 `browser.launchOptions.args` 承载（打包时由 `ensureWorkspaceSeeded` 复制）。
+
+### 10.2 协议事件
+
+- `PROGRESS` 新增可选 `accountId`（整数）与 `laneStatus`（`queued` / `running` / `error`）。
+- 新增 `MEMORY` 事件：
+
+```json
+{"type":"MEMORY","jobId":"...","budgetGB":12.9,"projectChromeGB":1.1,
+ "perAccountAvgGB":0.55,"remainingCount":17,"level":"info","message":"..."}
+```
+
+### 10.3 账号与 AI 子命令
+
+- `python -m chaoxing.accounts list|add|edit|remove`：单行 JSON；显式编号、
+  删除不重排、新增复用最小空位、原子写入 + `.bak` 备份 + 读回校验。
+- `python -m chaoxing.ai_config test`：读 `doubao.txt` 调方舟 `/models`，
+  单行 JSON（key 不进命令行）。
+- 环境变量 `CHAOXING_ACCOUNTS_FILE` 覆盖账号文件路径（Electron 全局设置下发）。
+
+### 10.4 内存模型
+
+- 启动前：`预算 = (总内存 − 基线) × 0.75`，`cpuCap = max(2, 线程数 − 2)`，
+  `最大并发 = min(⌊(预算−0.3)/0.7⌋, cpuCap)`。
+- 运行中：后端每 5 秒采样项目 Chrome 进程树，实测 EWMA 收紧开闸；
+  系统总占用逼近上限且项目自身为主因且连续两次不回落时急停。
