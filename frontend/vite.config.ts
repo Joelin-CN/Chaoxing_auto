@@ -45,6 +45,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins,
+    // Relative asset base so the built renderer works when loaded via
+    // file:// in Electron (an absolute "/assets/..." base resolves to the
+    // filesystem root and produces a blank window).
+    base: './',
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),

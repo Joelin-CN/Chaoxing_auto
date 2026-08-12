@@ -26,6 +26,15 @@ export function createApiClient(): ChaoxingApi {
 }
 
 /**
+ * True when the shared client is the in-browser mock (no Electron API).
+ * Lets UI surfaces label simulated data (e.g. the dashboard resource panel)
+ * so it is not mistaken for a real reading.
+ */
+export function isMockMode(): boolean {
+  return instance instanceof MockApiClient
+}
+
+/**
  * Dispose and drop the shared client. Primarily for tests and full
  * teardown; the next createApiClient() call builds a fresh instance.
  */
