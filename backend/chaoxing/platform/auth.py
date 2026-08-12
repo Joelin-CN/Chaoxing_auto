@@ -80,6 +80,19 @@ _ALL_CREDS_CACHE = None
 _ALL_CREDS_LOCK = threading.Lock()
 
 
+def accounts_file_path() -> Path:
+    """Resolve the active Chaoxing account file (env override wins)."""
+    override = os.environ.get("CHAOXING_ACCOUNTS_FILE")
+    return Path(override) if override else CREDS_DIR / "chaoxing.txt"
+
+
+def invalidate_credentials_cache() -> None:
+    """Drop the cached credential parse so the next read hits disk."""
+    global _ALL_CREDS_CACHE
+    with _ALL_CREDS_LOCK:
+        _ALL_CREDS_CACHE = None
+
+
 def read_all_chaoxing_credentials() -> list[dict]:
     """Read ALL Chaoxing accounts from passwords/chaoxing.txt.
 
@@ -96,7 +109,7 @@ def read_all_chaoxing_credentials() -> list[dict]:
         if _ALL_CREDS_CACHE is not None:
             return list(_ALL_CREDS_CACHE)
 
-        cred_file = CREDS_DIR / "chaoxing.txt"
+        cred_file = accounts_file_path()
         if not cred_file.exists():
             log(f"Credential file not found: {cred_file}", "ERROR")
             _ALL_CREDS_CACHE = []
@@ -109,7 +122,7 @@ def read_all_chaoxing_credentials() -> list[dict]:
         for i in range(len(blocks)):
             blocks[i] = blocks[i].strip()
             if not blocks[i].startswith("{"):
-                blocks[i] = "{" + blocks[i]
+                blocks[i] = "{\n" + blocks[i]
             blocks[i] = blocks[i].rstrip('}').rstrip() + "\n}"
 
         accounts = []
