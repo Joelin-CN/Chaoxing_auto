@@ -17,11 +17,13 @@ def _fake_monitor():
 def test_queue_never_exceeds_slots(monkeypatch):
     max_seen = {"n": 0}
     lock = threading.Lock()
+    barrier = threading.Barrier(3)
 
     def fake_run_for_account(account_index, creds, args):
         with lock:
             max_seen["n"] += 1
             max_seen["peak"] = max(max_seen.get("peak", 0), max_seen["n"])
+        barrier.wait(timeout=5)
         time.sleep(0.05)
         with lock:
             max_seen["n"] -= 1
