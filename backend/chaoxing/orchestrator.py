@@ -15,10 +15,17 @@ import json
 import threading
 from pathlib import Path
 
-from chaoxing.constants import OUTPUT_DIR, SHUTDOWN_FLAG, ACCOUNT_SEMAPHORE
-from chaoxing.config import load_config
+from chaoxing.constants import OUTPUT_DIR, SHUTDOWN_FLAG, CHROME_PROFILES_DIR
+from chaoxing.config import load_config, get_config
 from chaoxing.session import set_active_session, _get_active_session
-from chaoxing.logging_setup import log, progress, check_signals, log_exception, phase
+from chaoxing.logging_setup import (
+    log, progress, check_signals, log_exception, phase, emit_memory,
+)
+from chaoxing import memory
+from chaoxing.memory import (
+    MemoryMonitor, MemorySamplerError, gate_open, measure_project_chrome_gb,
+    PER_ACCOUNT_INITIAL_GB,
+)
 from chaoxing.browser.engine import pw_snapshot, pw_goto, pw_click
 from chaoxing.platform.navigation import pw_goto_course
 from chaoxing.platform.auth import (
@@ -322,28 +329,51 @@ def run_for_account(account_index: int, creds: dict, args):
 #  Multi-threading
 # ══════════════════════════════════════════════════════════════════
 
-def _run_account_in_thread(account_index: int, creds: dict, args):
+_GATE_RETRY_SECONDS = 5
+_THREAD_STAGGER_SECONDS = 0.5
+
+
+def _run_account_in_thread(account_index: int, creds: dict, args, semaphore,
+                           monitor, budget_gb, initial_estimate_gb):
     """Thread target: wraps run_for_account with exception handling.
 
     Sets the thread name for logging. Catches all exceptions so one
     account's failure does not crash other threads.
 
-    Uses ACCOUNT_SEMAPHORE to limit concurrent Chrome instances based
-    on hardware capacity (default: 10).
+    Waits on the runtime-sized semaphore, then checks the live memory
+    budget before opening a browser. budget_gb=None disables the live gate
+    (CLI runs fall back to the semaphore alone).
     """
     tname = f"chaoxing-account-{account_index}"
     threading.current_thread().name = tname
+    progress(account_index, "Queued (waiting for a slot)", lane_status="queued")
 
-    acquired = ACCOUNT_SEMAPHORE.acquire(timeout=300)  # 5-min queue timeout
-    if not acquired:
-        log(f"Account {account_index}: semaphore timeout — "
-            f"too many concurrent sessions, skipping", "WARN")
-        return
-
+    semaphore.acquire()
     try:
         if SHUTDOWN_FLAG.is_set():
-            log(f"Shutdown flag set, skipping account {account_index}", "WARN")
+            progress(account_index, "Skipped (shutdown)", lane_status="error")
             return
+
+        if budget_gb is not None:
+            while not SHUTDOWN_FLAG.is_set():
+                try:
+                    project_gb = measure_project_chrome_gb()
+                except MemorySamplerError:
+                    project_gb = 0.0
+                est = monitor.effective_estimate_gb() if monitor \
+                    else initial_estimate_gb
+                if gate_open(project_gb, budget_gb, est):
+                    break
+                log(f"Account {account_index}: memory budget full, waiting...",
+                    "WARN")
+                time.sleep(_GATE_RETRY_SECONDS)
+            if SHUTDOWN_FLAG.is_set():
+                progress(account_index, "Skipped (shutdown)", lane_status="error")
+                return
+
+        if monitor:
+            monitor.adjust_active_count(+1)
+        progress(account_index, "Starting", lane_status="running")
         run_for_account(account_index, creds, args)
     except KeyboardInterrupt:
         log(f"Interrupted by user", "WARN")
@@ -351,7 +381,10 @@ def _run_account_in_thread(account_index: int, creds: dict, args):
     except Exception as e:
         log(f"Fatal error in thread for account {account_index}: {e}", "ERROR")
         log_exception(f"Account {account_index}: thread crash", exc=e)
+        progress(account_index, "FAILED", lane_status="error")
     finally:
+        if monitor:
+            monitor.adjust_active_count(-1)
         # Tear down the browser session this thread opened. playwright-cli
         # keeps Chrome alive as a daemon between commands, so without an
         # explicit close the Chrome processes linger after every job (the
@@ -361,7 +394,7 @@ def _run_account_in_thread(account_index: int, creds: dict, args):
             close_chaoxing_browser(account_index)
         except Exception as e:  # never let cleanup mask the real outcome
             log(f"Account {account_index}: browser close failed: {e}", "WARN")
-        ACCOUNT_SEMAPHORE.release()
+        semaphore.release()
 
 
 class RunConfig:
@@ -385,7 +418,9 @@ class RunConfig:
 
 def run_multi_account(account_indices: list[int], mode: str = "full",
                       course: str = None, grade_only: bool = False,
-                      content_only: bool = False):
+                      content_only: bool = False, max_concurrent: int = None,
+                      budget_gb: float = None, system_limit_gb: float = None,
+                      per_account_estimate_gb: float = None):
     """Run orchestrator for multiple accounts in parallel threads.
 
     This is the main entry point called by api.py for multi-account
@@ -398,6 +433,11 @@ def run_multi_account(account_indices: list[int], mode: str = "full",
         course: Optional course name filter (substring match).
         grade_only: "模拟运行" — solve/fill/AI-grade but never submit.
         content_only: Skip quiz phase, only complete content (仅内容).
+        max_concurrent: Runtime semaphore size (Electron-computed); defaults
+            to config max_concurrent.
+        budget_gb: Project memory budget; None disables the live gate.
+        system_limit_gb: Emergency system-used threshold; enables the monitor.
+        per_account_estimate_gb: Initial per-Chrome estimate.
 
     Returns:
         List of thread objects (all completed).
@@ -438,29 +478,56 @@ def run_multi_account(account_indices: list[int], mode: str = "full",
     log(f"Spawning {len(accounts_to_run)} parallel thread(s)...")
 
     SHUTDOWN_FLAG.clear()
-    threads = []
-    for cred in accounts_to_run:
-        t = threading.Thread(
-            target=_run_account_in_thread,
-            args=(cred["index"], cred, config),
-            name=f"chaoxing-account-{cred['index']}",
-            daemon=False,
-        )
-        t.start()
-        threads.append(t)
-        log(f"Started thread for account [{cred['index']}]")
-        time.sleep(1.0)  # Stagger to avoid all browsers launching simultaneously
+    slots = max(1, int(max_concurrent or get_config().max_concurrent or 1))
+    semaphore = threading.BoundedSemaphore(slots)
+    initial_estimate = float(per_account_estimate_gb or PER_ACCOUNT_INITIAL_GB)
 
+    monitor = None
+    if system_limit_gb:
+        monitor = MemoryMonitor(
+            budget_gb=float(budget_gb) if budget_gb else float(system_limit_gb),
+            system_limit_gb=float(system_limit_gb),
+            initial_estimate_gb=initial_estimate,
+            profile_root=str(CHROME_PROFILES_DIR),
+            on_event=emit_memory,
+            on_emergency=lambda: None,
+        )
+        monitor.start()
+
+    threads = []
     try:
-        for t in threads:
-            while t.is_alive():
-                t.join(timeout=1.0)
+        for cred in accounts_to_run:
+            t = threading.Thread(
+                target=_run_account_in_thread,
+                args=(cred["index"], cred, config, semaphore, monitor,
+                      budget_gb, initial_estimate),
+                name=f"chaoxing-account-{cred['index']}",
+                daemon=False,
+            )
+            t.start()
+            threads.append(t)
+            log(f"Started thread for account [{cred['index']}]")
+            time.sleep(_THREAD_STAGGER_SECONDS)
+
+        try:
+            for t in threads:
+                while t.is_alive():
+                    t.join(timeout=1.0)
+        except KeyboardInterrupt:
+            log("\n[!] Ctrl+C received. Signaling all threads to stop...", "WARN")
+            SHUTDOWN_FLAG.set()
+            for t in threads:
+                t.join(timeout=10.0)
+            log("All threads stopped (or timed out after 10s).")
     except KeyboardInterrupt:
         log("\n[!] Ctrl+C received. Signaling all threads to stop...", "WARN")
         SHUTDOWN_FLAG.set()
         for t in threads:
             t.join(timeout=10.0)
         log("All threads stopped (or timed out after 10s).")
+    finally:
+        if monitor:
+            monitor.stop()
 
     log(f"\n{'='*60}")
     log(f"Multi-account run complete. {len(threads)} account(s) processed.")

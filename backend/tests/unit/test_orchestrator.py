@@ -144,54 +144,68 @@ class TestRunMultiAccount:
 class TestRunAccountInThread:
     """Tests for _run_account_in_thread — thread target wrapper."""
 
+    @patch("chaoxing.orchestrator.progress")
+    @patch("chaoxing.orchestrator.close_chaoxing_browser")
     @patch("chaoxing.orchestrator.log")
     @patch("chaoxing.orchestrator.run_for_account")
-    def test_sets_thread_name(self, mock_run, mock_log):
+    def test_sets_thread_name(self, mock_run, mock_log, mock_close, mock_progress):
         """Should set thread name to chaoxing-account-N."""
         SHUTDOWN_FLAG.clear()
         creds = {"account": "testuser123", "index": 0}
         config = RunConfig()
 
         original_name = threading.current_thread().name
-        _run_account_in_thread(0, creds, config)
+        _run_account_in_thread(0, creds, config,
+                               threading.BoundedSemaphore(1), None, None, 0.7)
         threading.current_thread().name = original_name
         mock_run.assert_called_once()
 
+    @patch("chaoxing.orchestrator.progress")
+    @patch("chaoxing.orchestrator.close_chaoxing_browser")
     @patch("chaoxing.orchestrator.log")
     @patch("chaoxing.orchestrator.run_for_account")
-    def test_shutdown_flag_skips(self, mock_run, mock_log):
+    def test_shutdown_flag_skips(self, mock_run, mock_log, mock_close, mock_progress):
         """When SHUTDOWN_FLAG is set, should skip execution."""
         SHUTDOWN_FLAG.set()
         creds = {"account": "testuser", "index": 0}
         config = RunConfig()
 
-        _run_account_in_thread(0, creds, config)
+        _run_account_in_thread(0, creds, config,
+                               threading.BoundedSemaphore(1), None, None, 0.7)
         mock_run.assert_not_called()
         SHUTDOWN_FLAG.clear()
 
+    @patch("chaoxing.orchestrator.progress")
+    @patch("chaoxing.orchestrator.close_chaoxing_browser")
     @patch("chaoxing.orchestrator.log")
     @patch("chaoxing.orchestrator.run_for_account")
-    def test_keyboard_interrupt_sets_shutdown(self, mock_run, mock_log):
+    def test_keyboard_interrupt_sets_shutdown(self, mock_run, mock_log,
+                                              mock_close, mock_progress):
         """KeyboardInterrupt should set SHUTDOWN_FLAG."""
         SHUTDOWN_FLAG.clear()
         mock_run.side_effect = KeyboardInterrupt()
         creds = {"account": "testuser", "index": 0}
         config = RunConfig()
 
-        _run_account_in_thread(0, creds, config)
+        _run_account_in_thread(0, creds, config,
+                               threading.BoundedSemaphore(1), None, None, 0.7)
         assert SHUTDOWN_FLAG.is_set()
         SHUTDOWN_FLAG.clear()
 
+    @patch("chaoxing.orchestrator.progress")
+    @patch("chaoxing.orchestrator.close_chaoxing_browser")
     @patch("chaoxing.orchestrator.log")
     @patch("chaoxing.orchestrator.run_for_account")
-    def test_exception_does_not_propagate(self, mock_run, mock_log):
+    def test_exception_does_not_propagate(self, mock_run, mock_log,
+                                          mock_close, mock_progress):
         """Exceptions in run_for_account should be caught, not propagated."""
         SHUTDOWN_FLAG.clear()
         mock_run.side_effect = RuntimeError("test error")
         creds = {"account": "testuser", "index": 0}
         config = RunConfig()
 
-        _run_account_in_thread(0, creds, config)
+        _run_account_in_thread(0, creds, config,
+                               threading.BoundedSemaphore(1), None, None, 0.7)
         assert not SHUTDOWN_FLAG.is_set()
 
 

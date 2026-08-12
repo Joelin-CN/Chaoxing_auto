@@ -133,18 +133,29 @@ class StdioProtocol:
 
     # -- Progress -------------------------------------------------------
 
-    def emit_progress(self, percent: int, message: str) -> None:
-        """Emit a PROGRESS event.
+    def emit_progress(self, percent: int, message: str,
+                      account_id: int = None, lane_status: str = None) -> None:
+        """Emit a PROGRESS event, optionally scoped to one account lane.
 
         Args:
             percent: Completion percentage (0-100).
             message: Human-readable status message.
+            account_id: Optional zero-based account index this event targets.
+            lane_status: Optional lane state hint ('queued' | 'running' |
+                'error'), forwarded to the renderer's lane status machine.
         """
-        _write_json_line({
-            "type": "PROGRESS",
-            "percent": percent,
-            "message": message,
-        })
+        payload = {"type": "PROGRESS", "percent": percent, "message": message}
+        if account_id is not None:
+            payload["accountId"] = account_id
+        if lane_status:
+            payload["laneStatus"] = lane_status
+        _write_json_line(payload)
+
+    # -- Memory ----------------------------------------------------------
+
+    def emit_memory(self, payload: dict) -> None:
+        """Emit a MEMORY event with the runtime memory-budget snapshot."""
+        _write_json_line(payload)
 
     # -- Phase ----------------------------------------------------------
 
@@ -257,6 +268,8 @@ def _make_protocol_handler(protocol: StdioProtocol):
             protocol.emit_progress(
                 percent=event.get("percent", 0),
                 message=event.get("message", ""),
+                account_id=event.get("accountId"),
+                lane_status=event.get("laneStatus"),
             )
         elif event_type == "PHASE":
             phase = event.get("phase", "")
@@ -266,6 +279,8 @@ def _make_protocol_handler(protocol: StdioProtocol):
             ticket = event.get("ticket")
             if isinstance(ticket, dict):
                 protocol.emit_ticket(ticket)
+        elif event_type == "MEMORY":
+            protocol.emit_memory(event)
 
     return handler
 
@@ -525,16 +540,30 @@ Stdin control signals (one per line, read by background thread):
         help="Skip the quiz phase; only complete content sections (仅内容).",
     )
     parser.add_argument(
-        "--chromium-flags", type=str, default=None,
-        help="Space-separated Chromium launch flags injected by the Electron "
-             "PythonBridge (e.g. '--renderer-process-limit=1 --disable-dev-shm-usage "
-             "--max-old-space-size=512'). Forwarded to the Chrome launch in "
-             "platform.auth as additional chrome_args. Optional.",
+        "--max-concurrent", type=int, default=None,
+        help="Runtime size of the account semaphore (Electron computes this "
+             "from the memory/CPU plan; CLI runs fall back to config).",
+    )
+    parser.add_argument(
+        "--budget-gb", type=float, default=None,
+        help="Project memory budget in GB (Electron-computed).",
+    )
+    parser.add_argument(
+        "--system-limit-gb", type=float, default=None,
+        help="Absolute system-used-RAM emergency threshold in GB "
+             "(baseline + budget + margin, Electron-computed).",
+    )
+    parser.add_argument(
+        "--per-account-estimate-gb", type=float, default=None,
+        help="Initial per-Chrome memory estimate in GB (default 0.7).",
     )
     cli = parser.parse_args()
 
     _job_id = cli.job_id
     protocol = StdioProtocol(cli.job_id)
+    from chaoxing.logging_setup import set_ram_limit_gb
+    if cli.system_limit_gb:
+        set_ram_limit_gb(float(cli.system_limit_gb))
 
     # -- Validate --accounts -------------------------------------------
     account_indices_raw = [
@@ -573,25 +602,6 @@ Stdin control signals (one per line, read by background thread):
         if course_ids:
             course_filter = ",".join(course_ids)
 
-    # -- Forward --chromium-flags to Chrome launch ----------------------
-    # The Electron PythonBridge injects memory-mitigation flags on every
-    # spawn. Merge them into the config's chrome_args so platform.auth's
-    # browser launch actually applies them. Failure here must not abort the
-    # job, so it is best-effort and logged as a warning.
-    if cli.chromium_flags:
-        chromium_flag_list = [
-            f for f in cli.chromium_flags.split() if f.strip()
-        ]
-        if chromium_flag_list:
-            try:
-                from chaoxing.config import get_config
-                get_config().add_chrome_args(chromium_flag_list)
-            except Exception as e:  # pragma: no cover - defensive
-                protocol.emit_log(
-                    "warn",
-                    f"Could not apply --chromium-flags ({e}); continuing with defaults",
-                )
-
     # -- Start stdin controller daemon ----------------------------------
     stdin_ctrl = StdinController(protocol)
     stdin_ctrl.start()
@@ -618,6 +628,10 @@ Stdin control signals (one per line, read by background thread):
             course=course_filter,
             grade_only=cli.grade_only,
             content_only=cli.content_only,
+            max_concurrent=cli.max_concurrent,
+            budget_gb=cli.budget_gb,
+            system_limit_gb=cli.system_limit_gb,
+            per_account_estimate_gb=cli.per_account_estimate_gb,
         )
 
         # -- Success ----------------------------------------------------

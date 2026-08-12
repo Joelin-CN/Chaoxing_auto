@@ -41,13 +41,9 @@ PACKAGE_DIR = Path(__file__).parent
 JS_DIR = PACKAGE_DIR / "js"
 DATA_DIR = PACKAGE_DIR / "data"
 
-# ── Max Concurrent Accounts ────────────────────────────────────
-# Limits simultaneous Chrome browser instances. Based on hardware:
-# AMD Ryzen 9 8945HX (16C/32T), 32GB RAM, RTX 5070 (~4GB VRAM).
-# With --disable-gpu, RAM is the bottleneck: ~400MB per instance.
-# Conservative limit of 10 accounts accounts for laptop thermals.
-MAX_CONCURRENT_ACCOUNTS = 10
-ACCOUNT_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT_ACCOUNTS)
+# ── Account list sanity cap (NOT a concurrency limit) ───────────
+# Concurrency is decided per job by the memory/CPU plan (chaoxing.memory).
+MAX_ACCOUNTS = 50
 
 # ── Graceful Shutdown ──────────────────────────────────────────
 # Set by the orchestrator when Ctrl+C is caught. Worker threads

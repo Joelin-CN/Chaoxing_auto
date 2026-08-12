@@ -652,38 +652,39 @@ class TestCLIArguments:
         assert call_kwargs["account_indices"] == [0]
 
     @patch("chaoxing.api.run_multi_account")
-    def test_chromium_flags_accepted_and_forwarded(self, mock_run):
-        """--chromium-flags (sent by the Electron PythonBridge on every spawn)
-        must NOT crash argparse, and must be merged into config chrome_args so
-        platform.auth applies them at Chrome launch. Regression guard for the
-        startup-level integration blocker."""
-        from chaoxing.config import get_config
-        # Ensure a clean baseline for the flags we assert on.
-        cfg_mgr = get_config()
-        before = list(cfg_mgr.chrome_args)
+    def test_memory_plan_args_forwarded(self, mock_run):
+        """Memory-plan args from Electron must reach run_multi_account."""
         with patch.object(sys, 'argv', [
             'chaoxing.api',
-            '--chromium-flags',
-            '--renderer-process-limit=1 --disable-dev-shm-usage --max-old-space-size=512',
-            '--job-id', 'job_flags',
+            '--job-id', 'job_plan',
             '--accounts', '0',
             '--mode', 'full',
+            '--max-concurrent', '18',
+            '--budget-gb', '12.9',
+            '--system-limit-gb', '14.9',
+            '--per-account-estimate-gb', '0.7',
         ]):
             try:
                 from chaoxing import api
                 api.main()
             except SystemExit:
                 pass
-        # Backend must have dispatched (did not die on unknown arg).
         mock_run.assert_called_once()
-        # Flags must have reached the live config.
-        after = get_config().chrome_args
-        assert "--renderer-process-limit=1" in after
-        assert "--disable-dev-shm-usage" in after
-        assert "--max-old-space-size=512" in after
-        # Original defaults preserved.
-        for f in before:
-            assert f in after
+        kw = mock_run.call_args[1]
+        assert kw["max_concurrent"] == 18
+        assert kw["budget_gb"] == 12.9
+        assert kw["system_limit_gb"] == 14.9
+        assert kw["per_account_estimate_gb"] == 0.7
+        from chaoxing.logging_setup import set_ram_limit_gb
+        set_ram_limit_gb(None)
+
+    def test_chromium_flags_now_rejected(self):
+        """--chromium-flags was removed; argparse must reject it."""
+        exit_code = self._run_main(
+            "--chromium-flags", "--disable-gpu",
+            "--job-id", "job_flags", "--accounts", "0", "--mode", "full",
+        )
+        assert exit_code == 2
 
     @patch("chaoxing.api.run_multi_account")
     def test_mode_scan_only(self, mock_run):

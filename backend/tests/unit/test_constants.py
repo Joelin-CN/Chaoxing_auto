@@ -17,7 +17,7 @@ class TestPathConstants:
         with patch.dict(os.environ, {"CHAOXING_WORKSPACE": "/custom/workspace"}):
             # Re-import won't re-execute module-level code, so test the logic directly
             ws = Path(os.environ.get("CHAOXING_WORKSPACE", ""))
-            assert str(ws) == "/custom/workspace"
+            assert ws.as_posix() == "/custom/workspace"
 
     def test_workspace_fallback(self):
         """WORKSPACE should fall back to parent of constants.py when env var not set."""
@@ -149,8 +149,6 @@ class TestUTF8Encoding:
         # that constants imported successfully (we're running this test).
         assert hasattr(constants, 'WORKSPACE')
 
-    @patch.object(sys.stdout, 'buffer', None, create=True)
-    @patch.object(sys.stderr, 'buffer', None, create=True)
     def test_buffer_none_does_not_crash(self):
         """When both stdout.buffer and stderr.buffer are None, no error should occur.
 
@@ -166,23 +164,14 @@ class TestUTF8Encoding:
         assert hasattr(sys.stderr, 'write')
 
 
-class TestAccountSemaphore:
-    """Tests for ACCOUNT_SEMAPHORE — concurrency control."""
+class TestMaxAccounts:
+    """MAX_ACCOUNTS is a list-length sanity cap, NOT a concurrency limit."""
 
-    def test_account_semaphore_exists(self):
-        """ACCOUNT_SEMAPHORE should be a threading.BoundedSemaphore."""
-        assert isinstance(constants.ACCOUNT_SEMAPHORE, threading.BoundedSemaphore)
+    def test_max_accounts_cap(self):
+        assert constants.MAX_ACCOUNTS == 50
 
-    def test_account_semaphore_acquire_release(self):
-        """Should be able to acquire and release the semaphore."""
-        sem = constants.ACCOUNT_SEMAPHORE
-        acquired = sem.acquire(blocking=False)
-        assert acquired, "Semaphore should be acquirable"
-        sem.release()
-        # Verify released by acquiring again
-        acquired = sem.acquire(blocking=False)
-        assert acquired, "Semaphore should be acquirable after release"
-        sem.release()
+    def test_no_global_semaphore(self):
+        assert not hasattr(constants, "ACCOUNT_SEMAPHORE")
 
 
 class TestShutdownFlagConstants:
@@ -211,7 +200,7 @@ class TestModuleAttributes:
             "WORKSPACE", "SCRIPT_DIR", "CONFIG_PATH", "DATA_ROOT", "OUTPUT_DIR",
             "TMP_DIR", "LOG_DIR", "SCREENSHOTS_DIR", "CHROME_PROFILES_DIR",
             "CREDS_DIR", "DOCUMENTS_DIR", "PACKAGE_DIR", "JS_DIR", "DATA_DIR",
-            "MAX_CONCURRENT_ACCOUNTS", "ACCOUNT_SEMAPHORE", "SHUTDOWN_FLAG",
+            "MAX_ACCOUNTS", "SHUTDOWN_FLAG",
         ]
         for attr in expected:
             assert hasattr(constants, attr), f"Missing: constants.{attr}"

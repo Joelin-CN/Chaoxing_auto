@@ -390,19 +390,19 @@ class TestSaveDiscoveredState:
     def test_saves_with_default_session(self, mock_output_dir, mock_open, mock_session,
                                          mock_log):
         """Should save courses with default session suffix."""
-        mock_output_dir.__truediv__ = MagicMock(return_value=MagicMock())
         mock_session.return_value = "chaoxing-chrome"
         mock_path = MagicMock()
+        captured = []
+        mock_output_dir.__truediv__ = lambda _self, other: (
+            captured.append(str(other)) or mock_path)
         mock_output_dir.mkdir = MagicMock()
-        mock_output_dir.__truediv__.return_value = mock_path
 
         courses = [{"name": "Course1", "courseid": "101"}]
         save_discovered_state(courses)
 
         # Should write to discovered_courses.json (no suffix for default)
         mock_open.assert_called_once()
-        filepath = mock_open.call_args[0][0]
-        assert "discovered_courses" in str(filepath)
+        assert captured == ["discovered_courses.json"]
 
     @patch("chaoxing.discover.log")
     @patch("chaoxing.discover._get_active_session")
@@ -411,17 +411,17 @@ class TestSaveDiscoveredState:
     def test_saves_with_multi_account_session(self, mock_output_dir, mock_open,
                                                mock_session, mock_log):
         """Should append session suffix for multi-account sessions."""
-        mock_output_dir.__truediv__ = MagicMock(return_value=MagicMock())
         mock_session.return_value = "chaoxing-chrome-2"
         mock_path = MagicMock()
+        captured = []
+        mock_output_dir.__truediv__ = lambda _self, other: (
+            captured.append(str(other)) or mock_path)
         mock_output_dir.mkdir = MagicMock()
-        mock_output_dir.__truediv__.return_value = mock_path
 
         courses = [{"name": "Course1"}]
         save_discovered_state(courses)
 
-        filepath = mock_open.call_args[0][0]
-        assert "_chaoxing-chrome-2" in str(filepath)
+        assert captured == ["discovered_courses_chaoxing-chrome-2.json"]
 
     @patch("chaoxing.discover.log")
     @patch("chaoxing.discover._get_active_session")
@@ -483,7 +483,7 @@ class TestSaveDiscoveredState:
         save_discovered_state(courses)
 
         assert len(written_content) > 0
-        parsed = json.loads(written_content[0])
+        parsed = json.loads("".join(written_content))
         assert len(parsed) == 1
         assert parsed[0]["name"] == "Test"
-        assert "ensure_ascii" in str(mock_open.call_args)
+        assert mock_open.call_args.kwargs.get("encoding") == "utf-8"

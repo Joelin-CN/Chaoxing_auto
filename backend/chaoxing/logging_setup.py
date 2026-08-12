@@ -62,6 +62,11 @@ def _emit_protocol(event: dict):
             pass  # Never crash because of protocol handler
 
 
+def emit_memory(payload: dict) -> None:
+    """Emit a MEMORY event through the protocol handler (no-op in CLI mode)."""
+    _emit_protocol(payload)
+
+
 def log(msg: str, level: str = "INFO"):
     """Log a message with timestamp and thread prefix.
 
@@ -110,7 +115,8 @@ def log(msg: str, level: str = "INFO"):
         pass  # Never crash because of logging
 
 
-def progress(account_index: int, step: str, current: int = 0, total: int = 0):
+def progress(account_index: int, step: str, current: int = 0, total: int = 0,
+             lane_status: str = None):
     """Emit a machine-parseable progress line for the CLI panel.
 
     Format: PROGRESS:[N] current/total step_description
@@ -125,6 +131,8 @@ def progress(account_index: int, step: str, current: int = 0, total: int = 0):
         step: Human-readable step description.
         current: Current item number (0 if not applicable).
         total: Total items (0 if not applicable).
+        lane_status: Optional lane state hint ('queued' | 'running' | 'error')
+            forwarded through the JSON-line protocol to the renderer.
     """
     global _log_dir_created
 
@@ -136,12 +144,16 @@ def progress(account_index: int, step: str, current: int = 0, total: int = 0):
     if _protocol_handler:
         from datetime import datetime, timezone
         percent = int((current / total) * 100) if total > 0 else 0
-        _emit_protocol({
+        payload = {
             "type": "PROGRESS",
             "percent": percent,
             "message": f"[{account_index}] {step}",
+            "accountId": account_index,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        }
+        if lane_status:
+            payload["laneStatus"] = lane_status
+        _emit_protocol(payload)
     else:
         print(line, flush=True)
 
@@ -327,6 +339,26 @@ _RAM_WARN_GB = 20       # Log warning when system used RAM exceeds this
 _RAM_THROTTLE_GB = 22   # Inject sleep delays when system used RAM exceeds this
 _RAM_CRITICAL_GB = 24   # Trigger emergency stop when system used RAM exceeds this
 
+_ram_limit_override = None
+
+
+def set_ram_limit_gb(limit_gb):
+    """Override the absolute RAM guard thresholds for the current job.
+
+    Pass None to restore the legacy 20/22/24 GB thresholds (CLI mode).
+    """
+    global _ram_limit_override
+    _ram_limit_override = float(limit_gb) if limit_gb else None
+
+
+def _ram_thresholds():
+    if _ram_limit_override:
+        return (_ram_limit_override - 2.0,
+                _ram_limit_override - 1.0,
+                _ram_limit_override)
+    return (_RAM_WARN_GB, _RAM_THROTTLE_GB, _RAM_CRITICAL_GB)
+
+
 _last_ram_check_time = 0.0
 _ram_check_interval = 5.0  # Seconds between Windows API calls
 _last_ram_usage_gb = 0.0   # Cached value between check intervals
@@ -399,27 +431,28 @@ def check_signals():
     """
     # -- System RAM guard (check BEFORE blocking on pause) ----------
     ram_gb = _get_system_ram_usage_gb()
+    warn_gb, throttle_gb, critical_gb = _ram_thresholds()
 
-    if ram_gb >= _RAM_CRITICAL_GB:
+    if ram_gb >= critical_gb:
         _stop_event.set()
         SHUTDOWN_FLAG.set()
         raise KeyboardInterrupt(
             f"EMERGENCY STOP: System RAM usage {ram_gb:.1f} GB >= "
-            f"{_RAM_CRITICAL_GB} GB hard limit — initiating shutdown"
+            f"{critical_gb} GB hard limit — initiating shutdown"
         )
 
-    if ram_gb >= _RAM_WARN_GB:
-        level = "CRITICAL" if ram_gb >= _RAM_THROTTLE_GB else "WARN"
+    if ram_gb >= warn_gb:
+        level = "CRITICAL" if ram_gb >= throttle_gb else "WARN"
         # Use stderr to avoid interfering with the JSON-line protocol on stdout
         msg = (
             f"[RAM {level}] System memory: {ram_gb:.1f} GB in use. "
-            f"Thresholds: warn={_RAM_WARN_GB}G throttle={_RAM_THROTTLE_GB}G "
-            f"critical={_RAM_CRITICAL_GB}G"
+            f"Thresholds: warn={warn_gb}G throttle={throttle_gb}G "
+            f"critical={critical_gb}G"
         )
         sys.stderr.write(msg + "\n")
         sys.stderr.flush()
 
-        if ram_gb >= _RAM_THROTTLE_GB:
+        if ram_gb >= throttle_gb:
             time.sleep(2.0)  # Slow down all threads to reduce allocation rate
 
     # -- Pause / Stop signals ---------------------------------------
