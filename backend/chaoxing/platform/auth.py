@@ -281,7 +281,7 @@ def ensure_chaoxing_browser(account_index: int = 0) -> bool:
     ]
     if _headed:
         cmd.append("--headed")
-    cmd.append(login_url)
+    cmd.append("about:blank")
     result = subprocess.run(
         cmd,
         cwd=str(WORKSPACE), capture_output=True, text=True,
@@ -293,6 +293,13 @@ def ensure_chaoxing_browser(account_index: int = 0) -> bool:
         log(f"[!] playwright-cli open failed (rc={result.returncode}): "
             f"{(result.stderr or result.stdout or '').strip()[:300]}")
     time.sleep(4)
+
+    # Navigate via the engine after the session is up: pw_goto JSON-escapes
+    # the URL, so query strings containing '&' survive the cmd.exe wrapper.
+    try:
+        pw_goto(login_url)
+    except Exception as e:
+        log(f"Navigate to login failed after open: {e}", "WARN")
 
     # Set window title (cosmetic, only visible in headed mode)
     try:
