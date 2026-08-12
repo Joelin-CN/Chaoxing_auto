@@ -2,28 +2,27 @@ import { ipcMain } from 'electron'
 import { spawn } from 'child_process'
 import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
 import { getCurrentSettings } from './status.handler'
+import { isJobActive } from './jobState'
 import type { Account } from '../types'
 import { IPC_CHANNELS } from '../types'
 
 /**
- * Account listing (`python -m chaoxing.accounts`) — reads the real accounts
- * configured in passwords/chaoxing.txt via the shared backend parser.
- *
+ * Account management (`python -m chaoxing.accounts`) — list/add/edit/remove.
  * Standalone CLI, decoupled from the job event stream. Prints a SINGLE line of
  * JSON to stdout and exits:
- *   - success → `{ "type":"ACCOUNTS", "accounts":[{index,account}, ...] }` (exit 0)
- *   - failure → `{ "type":"ERROR", "error":"...", "detail":"..." }`        (exit 1)
+ *   - list   → `{ "type":"ACCOUNTS", "accounts":[{index,account}, ...] }`
+ *   - mutate → `{ "type":"ACCOUNTS_OK", ... }` (exit 0)
+ *   - fail   → `{ "type":"ERROR", "error":"...", "detail":"..." }`  (exit 1)
  *
- * SECURITY: the backend never emits passwords — only each account's index and
- * login id (phone/email). The renderer masks the id for display (maskPhone).
+ * SECURITY: passwords are never emitted — only each account's index and login
+ * id. Mutations only accept the password over IPC; it is never logged.
  */
 
-/** Interpreter for the listing (no SDK needed — plain stdlib parse). */
+/** Interpreter for the listing/mutations (no SDK needed — stdlib parse). */
 function getAccountsPython(): string {
   return getCurrentSettings().pythonPath || 'python'
 }
 
-/** Hard timeout so a hung parse can't leave the renderer waiting forever. */
 const ACCOUNTS_TIMEOUT_MS = 15_000
 
 interface BackendAccount {
@@ -42,12 +41,15 @@ interface AccountsOkPayload {
   accounts: BackendAccount[]
 }
 
-/**
- * Map a backend account (index + raw login id) to the renderer Account shape.
- * `username` carries the raw id; the renderer masks it (138****0000) for
- * display, so the full id never needs to round-trip through the UI layer.
- * `id` = backend index, which is exactly what a job's `--accounts` expects.
- */
+interface AccountsMutatedPayload {
+  type: 'ACCOUNTS_OK'
+  action: 'add' | 'edit' | 'remove'
+  index: number
+  account: string | null
+}
+
+type AccountsPayload = AccountsOkPayload | AccountsMutatedPayload | AccountsErrorPayload
+
 function toAccount(b: BackendAccount): Account {
   const now = new Date().toISOString()
   return {
@@ -59,7 +61,7 @@ function toAccount(b: BackendAccount): Account {
   }
 }
 
-function runAccountsQuery(): Promise<Account[]> {
+function runAccountsCommand(extraArgs: string[]): Promise<AccountsPayload> {
   return new Promise((resolve, reject) => {
     const pythonPath = getAccountsPython()
 
@@ -68,7 +70,7 @@ function runAccountsQuery(): Promise<Account[]> {
       'PATH', 'SYSTEMROOT', 'SYSTEMDRIVE', 'TEMP', 'TMP',
       'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
       'PYTHONPATH', 'PYTHONHOME',
-      'CHAOXING_WORKSPACE', 'CHAOXING_DATA_DIR',
+      'CHAOXING_WORKSPACE', 'CHAOXING_DATA_DIR', 'CHAOXING_ACCOUNTS_FILE',
     ]
     const safeEnv: Record<string, string> = { PYTHONUNBUFFERED: '1' }
     for (const key of ALLOWED_ENV) {
@@ -76,20 +78,20 @@ function runAccountsQuery(): Promise<Account[]> {
         safeEnv[key] = process.env[key]!
       }
     }
-    // Pin workspace so passwords/chaoxing.txt resolves to the right tree
-    // regardless of launch cwd (see docs/design/integration.md §4).
     safeEnv.CHAOXING_WORKSPACE = process.env.CHAOXING_WORKSPACE ?? WORKSPACE_DIR
     safeEnv.CHAOXING_DATA_DIR = process.env.CHAOXING_DATA_DIR ?? DATA_DIR
+    const accountsFile = getCurrentSettings().accountsFilePath
+    if (accountsFile) safeEnv.CHAOXING_ACCOUNTS_FILE = accountsFile
 
     let child
     try {
-      child = spawn(pythonPath, ['-m', 'chaoxing.accounts'], {
+      child = spawn(pythonPath, ['-m', 'chaoxing.accounts', ...extraArgs], {
         cwd: CODE_DIR,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: safeEnv,
       })
     } catch (err: any) {
-      reject(new Error(`Failed to launch account listing: ${err?.message ?? err}`))
+      reject(new Error(`Failed to launch account command: ${err?.message ?? err}`))
       return
     }
 
@@ -101,7 +103,7 @@ function runAccountsQuery(): Promise<Account[]> {
       if (settled) return
       settled = true
       child.kill('SIGKILL')
-      reject(new Error('读取账号列表超时（15 秒未返回）。'))
+      reject(new Error('账号操作超时（15 秒未返回）。'))
     }, ACCOUNTS_TIMEOUT_MS)
 
     child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf-8') })
@@ -124,38 +126,59 @@ function runAccountsQuery(): Promise<Account[]> {
       settled = true
       clearTimeout(timer)
 
-      // The backend's log() prints to stdout in subcommand mode, so the JSON
-      // contract line is the LAST non-empty line (all logging precedes it).
       const line = stdout.split('\n').map((l) => l.trim()).filter(Boolean).pop()
-
       if (!line) {
         const detail = stderr.trim() ? ` (${stderr.trim()})` : ''
-        reject(new Error(`读取账号列表无输出（exit ${code}）${detail}`))
+        reject(new Error(`账号操作无输出（exit ${code}）${detail}`))
         return
       }
 
-      let parsed: AccountsOkPayload | AccountsErrorPayload
+      let parsed: AccountsPayload
       try {
         parsed = JSON.parse(line)
       } catch {
-        reject(new Error(`账号列表返回非 JSON：${line}`))
+        reject(new Error(`账号操作返回非 JSON：${line}`))
         return
       }
 
-      if (parsed.type === 'ACCOUNTS') {
-        resolve(parsed.accounts.map(toAccount))
+      if (parsed.type === 'ERROR') {
+        const errPayload = parsed as AccountsErrorPayload
+        const detail = errPayload.detail ? `（${errPayload.detail}）` : ''
+        reject(new Error(`${errPayload.error ?? '账号操作失败'}${detail}`))
         return
       }
-
-      const errPayload = parsed as AccountsErrorPayload
-      const detail = errPayload.detail ? `（${errPayload.detail}）` : ''
-      reject(new Error(`${errPayload.error ?? '读取账号列表失败'}${detail}`))
+      resolve(parsed)
     })
   })
 }
 
+function requireIdle(): void {
+  if (isJobActive()) throw new Error('任务运行中不可修改账号。')
+}
+
 export function registerAccountsHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.ACCOUNTS_LIST, async () => {
-    return runAccountsQuery()
+    const parsed = await runAccountsCommand([])
+    if (parsed.type !== 'ACCOUNTS') throw new Error('账号列表返回异常。')
+    return parsed.accounts.map(toAccount)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.ACCOUNTS_ADD, async (_e, p) => {
+    requireIdle()
+    await runAccountsCommand(['add', '--account', String(p.account),
+      '--password', String(p.password),
+      ...(p.website ? ['--website', p.website] : [])])
+  })
+
+  ipcMain.handle(IPC_CHANNELS.ACCOUNTS_EDIT, async (_e, p) => {
+    requireIdle()
+    await runAccountsCommand(['edit', '--index', String(p.index),
+      ...(p.password ? ['--password', String(p.password)] : []),
+      ...(p.website ? ['--website', p.website] : [])])
+  })
+
+  ipcMain.handle(IPC_CHANNELS.ACCOUNTS_REMOVE, async (_e, p) => {
+    requireIdle()
+    await runAccountsCommand(['remove', '--index', String(p.index)])
   })
 }
