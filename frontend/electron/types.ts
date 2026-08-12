@@ -196,6 +196,8 @@ export interface PythonProgressEvent {
   message: string
   phase?: string
   phaseIndex?: number
+  accountId?: number
+  laneStatus?: 'queued' | 'running' | 'error'
 }
 
 export interface PythonLogEvent {
@@ -247,6 +249,7 @@ export type PythonBridgeEvent =
   | PythonTicketEvent
   | PythonResultEvent
   | PythonErrorEvent
+  | PythonMemoryEvent
   | PythonDoneEvent
 
 /**

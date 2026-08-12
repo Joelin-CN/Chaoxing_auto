@@ -1,7 +1,17 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { execSync, execFile } from 'child_process'
 import os from 'os'
+import path from 'path'
 import { PythonBridge } from '../python/pythonBridge'
+import { DATA_DIR } from '../backendPath'
+import { getCurrentSettings } from './status.handler'
+import { setJobActive } from './jobState'
+import {
+  computeMemoryPlan,
+  measureProjectChromeGB,
+  measureSystemUsedGB,
+  PYTHON_OVERHEAD_GB,
+} from '../memory/planner'
 import type {
   JobControlPayload,
   JobLaneStatus,
@@ -13,8 +23,6 @@ import { IPC_CHANNELS } from '../types'
 
 const MAX_ACCOUNTS = 50
 const RATE_LIMIT_COOLDOWN_MS = 500
-const CHROMIUM_RAM_PER_ACCOUNT_MB = 350
-const MAX_RAM_USAGE_RATIO = 0.7
 /** Keep at most this many finished jobs in memory; older entries are dropped
  *  so the jobs map cannot grow without bound over a long-running session. */
 const MAX_RETAINED_JOBS = 20
@@ -78,25 +86,6 @@ function validateAccountIds(raw: unknown): number[] {
     ids.push(parsed)
   }
   return ids
-}
-
-function checkRamLimit(requestedCount: number): { safe: boolean; maxSafe: number; warning: string | null } {
-  const freeMB = os.freemem() / (1024 * 1024)
-  const maxByRam = Math.floor((freeMB * MAX_RAM_USAGE_RATIO) / CHROMIUM_RAM_PER_ACCOUNT_MB)
-  const maxSafe = Math.min(maxByRam, MAX_ACCOUNTS)
-
-  if (requestedCount <= maxSafe) {
-    return { safe: true, maxSafe, warning: null }
-  }
-
-  const warning = [
-    `The selected account count exceeds the current safe memory estimate.`,
-    `Requested: ${requestedCount} accounts.`,
-    `Safe estimate: ${maxSafe} accounts.`,
-    `Free memory: ${Math.round(freeMB / 1024)} GB.`,
-  ].join(' ')
-
-  return { safe: false, maxSafe, warning }
 }
 
 function sendToRenderer(win: BrowserWindow, channel: string, ...args: unknown[]): void {
@@ -250,6 +239,7 @@ function stopWholeJob(job: JobStatus): void {
 
   activeJobId = null
   bridge = null
+  setJobActive(false)
 }
 
 function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
@@ -268,14 +258,36 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
       job.phase = event.phase as JobStatus['phase']
     }
 
-    updateRunningLanes(job, (lane) => ({
-      ...lane,
-      progress: event.percent,
-      currentTask: event.message,
-      currentPhase: event.phase ?? lane.currentPhase,
-    }))
+    if (typeof event.accountId === 'number' && job.lanes?.length) {
+      job.lanes = job.lanes.map((lane) => {
+        if (lane.accountId !== event.accountId) return lane
+        const status = event.laneStatus === 'queued'
+          ? 'queued'
+          : event.laneStatus === 'error'
+            ? 'error'
+            : 'running'
+        return {
+          ...lane,
+          status,
+          progress: event.percent,
+          currentTask: event.message,
+          currentPhase: event.phase ?? lane.currentPhase,
+        }
+      })
+    } else {
+      updateRunningLanes(job, (lane) => ({
+        ...lane,
+        progress: event.percent,
+        currentTask: event.message,
+        currentPhase: event.phase ?? lane.currentPhase,
+      }))
+    }
 
     sendToRenderer(win, IPC_CHANNELS.ON_PROGRESS, event)
+  })
+
+  currentBridge.on('memory', (event) => {
+    sendToRenderer(win, IPC_CHANNELS.ON_MEMORY, event)
   })
 
   currentBridge.on('phase', (event) => {
@@ -312,6 +324,7 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     job.message = event.error
     job.phase = (event.phase as JobStatus['phase']) ?? 'error'
     markTerminalLanes(job, 'error', job.progress)
+    setJobActive(false)
     sendToRenderer(win, IPC_CHANNELS.ON_ERROR, event)
   })
 
@@ -325,6 +338,7 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     job.message = 'Job completed.'
     job.finishedAt = new Date().toISOString()
     markTerminalLanes(job, 'completed', 100)
+    setJobActive(false)
 
     sendToRenderer(win, IPC_CHANNELS.ON_COMPLETED, event)
     activeJobId = null
@@ -346,6 +360,7 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     }
     bridge = null
     activeJobId = null
+    setJobActive(false)
   })
 
   return currentBridge
@@ -363,9 +378,18 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
     const rawAccountIds = payload.accountIds?.length ? payload.accountIds : []
     const accountIds = validateAccountIds(rawAccountIds)
 
-    const ramCheck = checkRamLimit(accountIds.length)
-    if (!ramCheck.safe) {
-      throw new Error(ramCheck.warning ?? 'Insufficient memory for the selected accounts.')
+    const totalGB = os.totalmem() / 1024 ** 3
+    let baselineGB = 0
+    try {
+      const leftover = await measureProjectChromeGB(path.join(DATA_DIR, 'chrome-profiles'))
+      baselineGB = Math.max(0, (await measureSystemUsedGB()) - leftover)
+    } catch {
+      baselineGB = (os.totalmem() - os.freemem()) / 1024 ** 3
+    }
+    const plan = computeMemoryPlan(totalGB, baselineGB, os.cpus().length,
+      getCurrentSettings().perAccountEstimateGB)
+    if (plan.budgetGB < PYTHON_OVERHEAD_GB + plan.perAccountEstimateGB) {
+      throw new Error(`内存预算不足以运行一个浏览器实例（预算 ${plan.budgetGB.toFixed(1)}GB）。`)
     }
 
     if (activeJobId) {
@@ -392,6 +416,7 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
       accountIds,
       courseIds,
       lanes: createInitialLanes(accountIds),
+      memoryPlan: plan,
     }
 
     retainJob(jobId, jobStatus)
@@ -414,6 +439,10 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
     if (payload.options?.focus === 'content') {
       args.push('--content-only')
     }
+    args.push('--max-concurrent', String(plan.maxConcurrent),
+              '--budget-gb', plan.budgetGB.toFixed(2),
+              '--system-limit-gb', plan.systemLimitGB.toFixed(2),
+              '--per-account-estimate-gb', String(plan.perAccountEstimateGB))
 
     try {
       bridge.start(args)
@@ -427,6 +456,8 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
       bridge = null
       throw new Error(`Failed to start Python process: ${message}`)
     }
+
+    setJobActive(true)
 
     return { jobId }
   })
@@ -561,4 +592,5 @@ export function stopActiveJob(): void {
     }
     activeJobId = null
   }
+  setJobActive(false)
 }

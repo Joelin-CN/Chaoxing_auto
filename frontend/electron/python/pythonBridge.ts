@@ -11,6 +11,7 @@ import type {
   PythonErrorEvent,
   PythonDoneEvent,
   PythonResultEvent,
+  PythonMemoryEvent,
 } from '../types'
 
 // ----------------------------------------------------------------
@@ -26,22 +27,6 @@ const CHROMIUM_RAM_PER_ACCOUNT_MB = 350
  *  Chromium sessions. Using 0.7 leaves 30% headroom for OS + GPU driver. */
 const MAX_RAM_USAGE_RATIO = 0.7
 
-/** Chromium flags to reduce per-instance memory/VRAM footprint:
- *  --renderer-process-limit=1     → single renderer process per browser
- *  --disable-dev-shm-usage        → use /tmp instead of /dev/shm (less RAM)
- *  --max-old-space-size=512       → cap V8 heap at 512MB
- *  --disable-gpu                  → no GPU rendering/compositing (new-headless
- *                                   Chromium would otherwise allocate VRAM)
- *  --disable-software-rasterizer  → don't fall back to SwiftShader either;
- *                                   keeps both VRAM and CPU rasterization down */
-const CHROMIUM_MEMORY_FLAGS = [
-  '--renderer-process-limit=1',
-  '--disable-dev-shm-usage',
-  '--max-old-space-size=512',
-  '--disable-gpu',
-  '--disable-software-rasterizer',
-]
-
 /** Upper bound for buffered stdout (bytes). A misbehaving backend that floods
  *  output without line breaks would otherwise grow `buffer` without limit. */
 const MAX_STDOUT_BUFFER_BYTES = 1_000_000
@@ -53,7 +38,7 @@ const MAX_STDOUT_BUFFER_BYTES = 1_000_000
 function isBridgeEvent(obj: unknown): obj is PythonBridgeEvent {
   if (typeof obj !== 'object' || obj === null) return false
   const o = obj as Record<string, unknown>
-  const known = ['PROGRESS', 'LOG', 'PHASE', 'TICKET', 'RESULT', 'ERROR', 'DONE']
+  const known = ['PROGRESS', 'LOG', 'PHASE', 'TICKET', 'RESULT', 'ERROR', 'DONE', 'MEMORY']
   return typeof o.type === 'string' && known.includes(o.type)
 }
 
@@ -68,6 +53,7 @@ export interface PythonBridgeEvents {
   ticket: [PythonTicketEvent]
   error: [PythonErrorEvent]
   result: [PythonResultEvent]
+  memory: [PythonMemoryEvent]
   done: [PythonDoneEvent]
   exit: [code: number | null]
 }
@@ -106,6 +92,7 @@ export class PythonBridge extends EventEmitter {
       'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
       'PYTHONPATH', 'PYTHONHOME',
       'CHAOXING_WORKSPACE', 'CHAOXING_DATA_DIR', 'CHAOXING_HEADED',
+      'CHAOXING_ACCOUNTS_FILE',
     ]
     const safeEnv: Record<string, string> = { PYTHONUNBUFFERED: '1' }
     for (const key of ALLOWED_ENV) {
@@ -124,10 +111,11 @@ export class PythonBridge extends EventEmitter {
     // launches a visible browser); headless:true (the default) leaves it "0".
     const settings = getCurrentSettings()
     safeEnv.CHAOXING_HEADED = settings.headless ? '0' : '1'
+    if (settings.accountsFilePath) {
+      safeEnv.CHAOXING_ACCOUNTS_FILE = settings.accountsFilePath
+    }
 
-    // Prepend Chromium memory-optimization flags so the Python
-    // backend can pass them to Playwright when launching browsers.
-    const fullArgs = ['-m', 'chaoxing.api', '--chromium-flags', CHROMIUM_MEMORY_FLAGS.join(' '), ...args]
+    const fullArgs = ['-m', 'chaoxing.api', ...args]
 
     // Honor the configured interpreter (default 'python', resolved via PATH).
     const pythonPath = settings.pythonPath || 'python'
@@ -344,6 +332,9 @@ export class PythonBridge extends EventEmitter {
         break
       case 'RESULT':
         this.emit('result', event)
+        break
+      case 'MEMORY':
+        this.emit('memory', event)
         break
       case 'DONE':
         this.emit('done', event)
