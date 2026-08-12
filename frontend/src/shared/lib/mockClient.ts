@@ -379,12 +379,46 @@ export class MockApiClient implements ChaoxingApi {
       debugMode: false,
       headless: true,
       targetAccuracy: 100,
+      accountsFilePath: '',
+      concurrencyTarget: null,
+      perAccountEstimateGB: 0.7,
     }
   }
 
   async setSettings(settings: Settings): Promise<void> {
     await sleep(100)
     localStorage.setItem('chaoxing-assistant-settings', JSON.stringify(settings))
+  }
+
+  async getAiStatus(): Promise<{ configured: boolean; model: string; keyTail: string }> {
+    await sleep(50)
+    return { configured: false, model: 'ep-demo', keyTail: '' }
+  }
+
+  async setAiConfig(_payload: { apiKey?: string; model: string }): Promise<void> {
+    await sleep(100)
+  }
+
+  async testAi(): Promise<{ ok: boolean; reason?: string; models?: number }> {
+    await sleep(300)
+    return { ok: true, models: 3 }
+  }
+
+  async addAccount(_payload: { account: string; password: string; website?: string }): Promise<void> {
+    await sleep(150)
+  }
+
+  async editAccount(_payload: { index: number; password?: string; website?: string }): Promise<void> {
+    await sleep(150)
+  }
+
+  async removeAccount(_index: number): Promise<void> {
+    await sleep(150)
+  }
+
+  async openFilePicker(): Promise<string | null> {
+    await sleep(50)
+    return null
   }
 
   async getTickets(): Promise<Ticket[]> {
@@ -474,6 +508,11 @@ export class MockApiClient implements ChaoxingApi {
 
   onResult(callback: (data: unknown) => void): () => void {
     return this.onWithCleanup('result', callback)
+  }
+
+  onMemory(_callback: (e: import('./types').MemoryEvent) => void): () => void {
+    // Mock mode never emits MEMORY events.
+    return () => {}
   }
 
   removeAllListeners(): void {

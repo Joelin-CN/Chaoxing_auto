@@ -67,7 +67,7 @@ export interface RuntimePhase {
 
 export interface AccountLane {
   accountId: string
-  status: 'pending' | 'running' | 'completed' | 'error' | 'paused' | 'stopped'
+  status: 'pending' | 'queued' | 'running' | 'completed' | 'error' | 'paused' | 'stopped'
   progress: number
   currentTask?: string
   currentPhase?: string
@@ -90,6 +90,41 @@ export interface JobHandle {
   phaseIndex: number
   phases: RuntimePhase[]
   lanes: AccountLane[]
+  memoryPlan?: MemoryPlan
+}
+
+export interface MemoryPlan {
+  totalGB: number
+  baselineGB: number
+  budgetGB: number
+  cpuCap: number
+  memMax: number
+  maxConcurrent: number
+  systemLimitGB: number
+  perAccountEstimateGB: number
+}
+
+export interface MemoryEvent {
+  type: 'MEMORY'
+  jobId?: string
+  budgetGB: number
+  projectChromeGB: number
+  perAccountAvgGB: number
+  remainingCount: number
+  level: 'info' | 'critical'
+  message: string
+}
+
+export interface AiStatus {
+  configured: boolean
+  model: string
+  keyTail: string
+}
+
+export interface AiTestResult {
+  ok: boolean
+  reason?: string
+  models?: number
 }
 
 export interface StartJobPayload {
@@ -186,6 +221,9 @@ export interface Settings {
   debugMode: boolean
   headless: boolean // run browser in background (no visible window)
   targetAccuracy: number // 60-100, default 100
+  accountsFilePath: string
+  concurrencyTarget: number | null
+  perAccountEstimateGB: number
 }
 
 export interface BackendSettings {
@@ -275,6 +313,14 @@ export interface ChaoxingApi {
   onCompleted(cb: (e: CompletionEvent) => void): () => void
   onError(cb: (e: ErrorEvent) => void): () => void
   onResult?(cb: (data: unknown) => void): () => void
+  onMemory(cb: (e: MemoryEvent) => void): () => void
+  getAiStatus(): Promise<AiStatus>
+  setAiConfig(payload: { apiKey?: string; model: string }): Promise<void>
+  testAi(): Promise<AiTestResult>
+  addAccount(payload: { account: string; password: string; website?: string }): Promise<void>
+  editAccount(payload: { index: number; password?: string; website?: string }): Promise<void>
+  removeAccount(index: number): Promise<void>
+  openFilePicker(): Promise<string | null>
   removeAllListeners(): void
   /** Release all event listeners registered by this API client instance. */
   dispose(): void

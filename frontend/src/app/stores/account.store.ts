@@ -59,6 +59,21 @@ export const useAccountStore = defineStore('account', () => {
     }
   }
 
+  async function addAccount(payload: { account: string; password: string; website?: string }): Promise<void> {
+    await api.addAccount(payload)
+    await fetchAccounts()
+  }
+
+  async function editAccount(payload: { index: number; password?: string; website?: string }): Promise<void> {
+    await api.editAccount(payload)
+    await fetchAccounts()
+  }
+
+  async function removeAccount(index: number): Promise<void> {
+    await api.removeAccount(index)
+    await fetchAccounts()
+  }
+
   function toggleAccountSelection(accountId: string): void {
     const set = new Set(selectedAccountIds.value)
     if (set.has(accountId)) {
@@ -99,6 +114,9 @@ export const useAccountStore = defineStore('account', () => {
     hasSelection,
     fetchAccounts,
     refreshAccountStatus,
+    addAccount,
+    editAccount,
+    removeAccount,
     toggleAccountSelection,
     selectAccount,
     deselectAccount,

@@ -150,6 +150,9 @@ export const DEFAULT_SETTINGS: Settings = {
   debugMode: false,
   headless: true,
   targetAccuracy: 100,
+  accountsFilePath: '',
+  concurrencyTarget: null,
+  perAccountEstimateGB: 0.7,
 }
 
 export const DEFAULT_FORECAST: Record<ObjectiveType, CampaignForecast> = {

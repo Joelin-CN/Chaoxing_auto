@@ -14,6 +14,9 @@ import type {
   StartJobPayload,
   SystemResources,
   Ticket,
+  MemoryEvent,
+  AiStatus,
+  AiTestResult,
 } from './types'
 import { MODES } from './constants'
 
@@ -203,6 +206,7 @@ export class ElectronApiClient implements ChaoxingApi {
         currentPhase: lane.currentPhase,
         errorMessage: lane.errorMessage,
       })),
+      memoryPlan: raw.memoryPlan,
     }
 
     this.currentHandle = handle
@@ -256,6 +260,9 @@ export class ElectronApiClient implements ChaoxingApi {
       debugMode: raw.logLevel === 'debug',
       headless: raw.headless,
       targetAccuracy: 100,
+      accountsFilePath: raw.accountsFilePath ?? '',
+      concurrencyTarget: raw.concurrencyTarget ?? null,
+      perAccountEstimateGB: raw.perAccountEstimateGB ?? 0.7,
     }
   }
 
@@ -265,7 +272,38 @@ export class ElectronApiClient implements ChaoxingApi {
       autoResolve: settings.autoResolveCaptcha,
       logLevel: settings.debugMode ? 'debug' : 'info',
       headless: settings.headless,
+      accountsFilePath: settings.accountsFilePath,
+      concurrencyTarget: settings.concurrencyTarget,
+      perAccountEstimateGB: settings.perAccountEstimateGB,
     } as any)
+  }
+
+  async getAiStatus(): Promise<AiStatus> {
+    return requireAPI().getAiStatus()
+  }
+
+  async setAiConfig(payload: { apiKey?: string; model: string }): Promise<void> {
+    await requireAPI().setAiConfig(payload)
+  }
+
+  async testAi(): Promise<AiTestResult> {
+    return requireAPI().testAi()
+  }
+
+  async addAccount(payload: { account: string; password: string; website?: string }): Promise<void> {
+    await requireAPI().addAccount(payload)
+  }
+
+  async editAccount(payload: { index: number; password?: string; website?: string }): Promise<void> {
+    await requireAPI().editAccount(payload)
+  }
+
+  async removeAccount(index: number): Promise<void> {
+    await requireAPI().removeAccount({ index })
+  }
+
+  async openFilePicker(): Promise<string | null> {
+    return requireAPI().openFilePicker()
   }
 
   async getTickets(): Promise<Ticket[]> {
@@ -392,6 +430,12 @@ export class ElectronApiClient implements ChaoxingApi {
 
   onResult(cb: (data: unknown) => void): () => void {
     const cleanup = requireAPI().onResult((event: any) => cb(event.data))
+    this.cleanupFns.push(cleanup)
+    return cleanup
+  }
+
+  onMemory(cb: (e: MemoryEvent) => void): () => void {
+    const cleanup = requireAPI().onMemory((event: any) => cb(event))
     this.cleanupFns.push(cleanup)
     return cleanup
   }
