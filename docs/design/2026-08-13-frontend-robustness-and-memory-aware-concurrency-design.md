@@ -145,7 +145,6 @@ PROGRESS.accountId → Electron lane 更新 → 队列/运行/完成状态
 | 常量 | 值 | 说明 |
 | --- | --- | --- |
 | `BUDGET_RATIO` | 0.75 | 预算占（总内存 − 基线）的比例 |
-| `PYTHON_OVERHEAD_GB` | 0.3 | Python 进程 + playwright-cli 守护进程预留 |
 | `PER_ACCOUNT_INITIAL_GB` | 0.7 | 初始单实例估算（实测 0.55 + 余量） |
 | `EMERGENCY_MARGIN_GB` | 1.0 | 急停余量 |
 | `SAMPLE_INTERVAL_S` | 5 | 采样周期 |
@@ -159,7 +158,7 @@ totalGB                = os.totalmem() / GiB
 baselineGB             = 当前系统已用 − 遗留项目 Chrome 占用
 budgetGB               = (totalGB − baselineGB) × 0.75
 cpuCap                 = max(2, os.cpus().length − 2)
-memMax                 = max(1, floor((budgetGB − 0.3) / PER_ACCOUNT_INITIAL_GB))
+memMax                 = max(1, floor(budgetGB / PER_ACCOUNT_INITIAL_GB))
 maxConcurrent          = min(memMax, cpuCap)
 systemLimitGB          = baselineGB + budgetGB + EMERGENCY_MARGIN_GB
 ```

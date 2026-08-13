@@ -1624,6 +1624,6 @@ AttentionQueueView — 使用 3 个 Store: Attention, Campaign, Log
 ### 10.4 内存模型
 
 - 启动前：`预算 = (总内存 − 基线) × 0.75`，`cpuCap = max(2, 线程数 − 2)`，
-  `最大并发 = min(⌊(预算−0.3)/0.7⌋, cpuCap)`。
+  `最大并发 = min(⌊预算/0.7⌋, cpuCap)`。
 - 运行中：后端每 5 秒采样项目 Chrome 进程树，实测 EWMA 收紧开闸；
   系统总占用逼近上限且项目自身为主因且连续两次不回落时急停。

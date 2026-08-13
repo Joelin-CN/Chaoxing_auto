@@ -15,6 +15,7 @@ import type {
   SystemResources,
   Ticket,
   MemoryEvent,
+  MemoryPlan,
   AiStatus,
   AiTestResult,
 } from './types'
@@ -306,6 +307,10 @@ export class ElectronApiClient implements ChaoxingApi {
     return requireAPI().openFilePicker()
   }
 
+  async getAccountsDefaultPath(): Promise<string> {
+    return requireAPI().getAccountsDefaultPath()
+  }
+
   async getTickets(): Promise<Ticket[]> {
     const raw = await requireAPI().getTickets()
     return raw.map((ticket: any) => mapElectronTicket(ticket))
@@ -342,6 +347,10 @@ export class ElectronApiClient implements ChaoxingApi {
   async getSystemResources(): Promise<SystemResources> {
     // Shape matches 1:1 across the IPC boundary; pass through.
     return requireAPI().getSystemResources()
+  }
+
+  async getMemoryPlan(): Promise<MemoryPlan> {
+    return requireAPI().getMemoryPlan()
   }
 
   onProgress(cb: (e: ProgressEvent) => void): () => void {

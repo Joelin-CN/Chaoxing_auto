@@ -71,6 +71,7 @@
       <FilePickerField
         v-model="accountsFilePath"
         label="当前账号文件"
+        :default-path="defaultAccountsPath"
       />
       <p v-if="accountsError" class="field__error">{{ accountsError }}</p>
       <div v-if="accountStore.accounts.length" class="creds-table">
@@ -105,7 +106,7 @@
       <BudgetGauge
         :plan="memoryStore.plan"
         :project-chrome-gb="memoryStore.latest?.projectChromeGB ?? 0"
-        :remaining-count="memoryStore.latest?.remainingCount ?? null"
+        :remaining-count="memoryStore.latest?.remainingCount ?? memoryStore.plan?.maxConcurrent ?? null"
         :mock="mockMode"
       />
       <div class="panel__grid">
@@ -159,28 +160,30 @@
     </GlassmorphicPanel>
 
     <!-- ── 账号编辑弹窗 ── -->
-    <GlassmorphicPanel v-if="editing" class="panel dialog-inline" padding="22px">
-      <h3 class="panel__title">{{ editing.id !== null ? '编辑账号' : '添加账号' }}</h3>
-      <div class="panel__grid">
-        <div class="field">
-          <label class="field__label">账号</label>
-          <input v-model="form.account" type="text" class="field__input" :disabled="editing.id !== null" />
+    <div v-if="editing" class="modal-mask" @click.self="closeEdit">
+      <div class="modal" role="dialog" aria-modal="true">
+        <h3 class="modal__title">{{ editing.id !== null ? '编辑账号' : '添加账号' }}</h3>
+        <div class="modal__body">
+          <div class="field">
+            <label class="field__label">账号</label>
+            <input v-model="form.account" type="text" class="field__input" :disabled="editing.id !== null" />
+          </div>
+          <div class="field">
+            <label class="field__label">密码</label>
+            <MaskedInput v-model="form.password" placeholder="请输入密码" />
+          </div>
+          <div class="field">
+            <label class="field__label">登录网址（可选）</label>
+            <input v-model="form.website" type="text" class="field__input" placeholder="留空使用默认登录页" />
+          </div>
         </div>
-        <div class="field">
-          <label class="field__label">密码</label>
-          <MaskedInput v-model="form.password" placeholder="请输入密码" />
-        </div>
-        <div class="field">
-          <label class="field__label">登录网址（可选）</label>
-          <input v-model="form.website" type="text" class="field__input" placeholder="留空使用默认登录页" />
+        <div class="modal__actions">
+          <button class="btn-primary" :disabled="busy" @click="submitAccount">保存</button>
+          <button class="btn-ghost" @click="closeEdit">取消</button>
+          <span class="field__error">{{ formError }}</span>
         </div>
       </div>
-      <div class="panel__actions">
-        <button class="btn-primary" :disabled="busy" @click="submitAccount">保存</button>
-        <button class="btn-ghost" @click="closeEdit">取消</button>
-        <span class="field__error">{{ formError }}</span>
-      </div>
-    </GlassmorphicPanel>
+    </div>
 
     <ConfirmDialog
       :open="deleting !== null"
@@ -217,7 +220,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import GlassmorphicPanel from '@/shared/ui/GlassmorphicPanel.vue'
 import StatusDot from '@/shared/ui/StatusDot.vue'
 import Toggle from '@/shared/ui/Toggle.vue'
@@ -255,6 +258,8 @@ const aiTestOk = ref(false)
 
 const accountsFilePath = ref(settingsStore.settings.accountsFilePath)
 const accountsError = ref('')
+const defaultAccountsPath = ref('')
+let planTimer: ReturnType<typeof setInterval> | null = null
 
 const editing = ref<{ id: number | null } | null>(null)
 const deleting = ref<Account | null>(null)
@@ -269,12 +274,27 @@ watch(accountsFilePath, (val) => {
   reloadAccounts()
 })
 
+watch(() => settingsStore.settings.perAccountEstimateGB, () => {
+  memoryStore.refreshPlan()
+})
+
 onMounted(async () => {
   try {
     aiStatus.value = await api.getAiStatus()
     aiModel.value = aiStatus.value.model
   } catch { /* backend unavailable */ }
+  try {
+    defaultAccountsPath.value = await api.getAccountsDefaultPath()
+  } catch { /* backend unavailable */ }
+  await memoryStore.refreshPlan()
+  planTimer = setInterval(async () => {
+    if (!executionStore.isRunning) await memoryStore.refreshPlan()
+  }, 5000)
   reloadAccounts()
+})
+
+onUnmounted(() => {
+  if (planTimer) clearInterval(planTimer)
 })
 
 async function reloadAccounts(): Promise<void> {
@@ -581,8 +601,40 @@ function setConcurrency(value: number): void {
   display: flex;
   gap: 8px;
 }
-.dialog-inline {
-  border-color: var(--accent-soft);
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.modal {
+  width: 420px;
+  max-width: calc(100vw - 40px);
+  padding: 22px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.modal__title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  color: var(--text);
+}
+.modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 @media (max-width: 600px) {
   .panel__grid { grid-template-columns: 1fr; }

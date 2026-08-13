@@ -421,6 +421,19 @@ export class MockApiClient implements ChaoxingApi {
     return null
   }
 
+  async getAccountsDefaultPath(): Promise<string> {
+    await sleep(20)
+    return 'data/passwords/chaoxing.txt'
+  }
+
+  async getMemoryPlan(): Promise<import('./types').MemoryPlan> {
+    await sleep(50)
+    return {
+      totalGB: 32, baselineGB: 14, budgetGB: 13.5, cpuCap: 8,
+      memMax: 19, maxConcurrent: 8, systemLimitGB: 28.5, perAccountEstimateGB: 0.7,
+    }
+  }
+
   async getTickets(): Promise<Ticket[]> {
     await sleep(150)
     if (Math.random() > 0.7) {

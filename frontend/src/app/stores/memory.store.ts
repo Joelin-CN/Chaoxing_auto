@@ -26,5 +26,13 @@ export const useMemoryStore = defineStore('memory', () => {
     plan.value = value
   }
 
-  return { latest, plan, running, start, stop, setPlan }
+  async function refreshPlan(): Promise<void> {
+    try {
+      plan.value = await api.getMemoryPlan()
+    } catch {
+      // Backend unavailable — keep the last known plan.
+    }
+  }
+
+  return { latest, plan, running, start, stop, setPlan, refreshPlan }
 })

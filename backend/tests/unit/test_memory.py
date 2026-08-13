@@ -8,7 +8,6 @@ from chaoxing.memory import (
     EMERGENCY_CONSECUTIVE,
     EMERGENCY_MARGIN_GB,
     PER_ACCOUNT_INITIAL_GB,
-    PYTHON_OVERHEAD_GB,
     PROJECT_CAUSE_RATIO,
     EwmaTracker,
     MemorySamplerError,
@@ -26,7 +25,7 @@ def test_compute_plan_matches_spec_example():
     assert plan["cpu_cap"] == 30
     assert plan["per_account_estimate_gb"] == PER_ACCOUNT_INITIAL_GB
     assert plan["mem_max"] == math.floor(
-        (plan["budget_gb"] - PYTHON_OVERHEAD_GB) / PER_ACCOUNT_INITIAL_GB)
+        plan["budget_gb"] / PER_ACCOUNT_INITIAL_GB)
     assert plan["max_concurrent"] == min(plan["mem_max"], plan["cpu_cap"])
     assert plan["system_limit_gb"] == pytest.approx(
         plan["baseline_gb"] + plan["budget_gb"] + EMERGENCY_MARGIN_GB)

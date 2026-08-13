@@ -20,6 +20,7 @@ import type {
   BalanceResult,
   SystemResources,
   PythonMemoryEvent,
+  MemoryPlan,
 } from './types'
 import { IPC_CHANNELS } from './types'
 
@@ -43,6 +44,7 @@ export interface ElectronAPI {
   resolveCaptcha: (payload: ResolveTicketPayload) => Promise<void>
   getBalance: () => Promise<BalanceResult>
   getSystemResources: () => Promise<SystemResources>
+  getMemoryPlan: () => Promise<MemoryPlan>
   getAiStatus: () => Promise<{ configured: boolean; model: string; keyTail: string }>
   setAiConfig: (payload: { apiKey?: string; model: string }) => Promise<void>
   testAi: () => Promise<{ ok: boolean; reason?: string; models?: number }>
@@ -50,6 +52,7 @@ export interface ElectronAPI {
   editAccount: (payload: { index: number; password?: string; website?: string }) => Promise<void>
   removeAccount: (payload: { index: number }) => Promise<void>
   openFilePicker: () => Promise<string | null>
+  getAccountsDefaultPath: () => Promise<string>
   onProgress: (cb: (event: PythonProgressEvent) => void) => () => void
   onPhaseChange: (cb: (event: PythonPhaseEvent) => void) => () => void
   onLog: (cb: (event: PythonLogEvent) => void) => () => void
@@ -96,6 +99,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.JOB_RESOLVE_TICKET, payload),
   getBalance: () => ipcRenderer.invoke(IPC_CHANNELS.BALANCE_QUERY),
   getSystemResources: () => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_RESOURCES),
+  getMemoryPlan: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_PLAN),
   getAiStatus: () => ipcRenderer.invoke(IPC_CHANNELS.AI_STATUS),
   setAiConfig: (payload: { apiKey?: string; model: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.AI_SET, payload),
@@ -107,6 +111,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeAccount: (payload: { index: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_REMOVE, payload),
   openFilePicker: () => ipcRenderer.invoke(IPC_CHANNELS.DIALOG_OPEN_FILE),
+  getAccountsDefaultPath: () => ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_DEFAULT_PATH),
   onProgress: makeListener<PythonProgressEvent>(IPC_CHANNELS.ON_PROGRESS),
   onPhaseChange: makeListener<PythonPhaseEvent>(IPC_CHANNELS.ON_PHASE_CHANGE),
   onLog: makeListener<PythonLogEvent>(IPC_CHANNELS.ON_LOG),

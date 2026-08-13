@@ -2,7 +2,6 @@ import os from 'os'
 import { execFile } from 'child_process'
 
 export const BUDGET_RATIO = 0.75
-export const PYTHON_OVERHEAD_GB = 0.3
 export const PER_ACCOUNT_INITIAL_GB = 0.7
 export const EMERGENCY_MARGIN_GB = 1.0
 
@@ -25,7 +24,7 @@ export function computeMemoryPlan(
 ): MemoryPlan {
   const budgetGB = (totalGB - baselineGB) * BUDGET_RATIO
   const cpuCap = Math.max(2, Math.floor(threads) - 2)
-  const memMax = Math.max(1, Math.floor((budgetGB - PYTHON_OVERHEAD_GB) / perAccountEstimateGB))
+  const memMax = Math.max(1, Math.floor(budgetGB / perAccountEstimateGB))
   const maxConcurrent = Math.max(1, Math.min(memMax, cpuCap))
   return {
     totalGB,

@@ -1,7 +1,15 @@
 import { ipcMain } from 'electron'
 import os from 'os'
+import path from 'path'
 import type { SystemResources } from '../types'
 import { IPC_CHANNELS } from '../types'
+import { DATA_DIR } from '../backendPath'
+import { getCurrentSettings } from './status.handler'
+import {
+  computeMemoryPlan,
+  measureProjectChromeGB,
+  measureSystemUsedGB,
+} from '../memory/planner'
 
 /**
  * Live system-resource provider (`system:resources`). Reads Node's `os` module
@@ -75,5 +83,18 @@ function readResources(): SystemResources {
 export function registerSystemHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SYSTEM_RESOURCES, async () => {
     return readResources()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.MEMORY_PLAN, async () => {
+    const totalGB = os.totalmem() / 1024 ** 3
+    let baselineGB = 0
+    try {
+      const leftover = await measureProjectChromeGB(path.join(DATA_DIR, 'chrome-profiles'))
+      baselineGB = Math.max(0, (await measureSystemUsedGB()) - leftover)
+    } catch {
+      baselineGB = (os.totalmem() - os.freemem()) / 1024 ** 3
+    }
+    return computeMemoryPlan(totalGB, baselineGB, os.cpus().length,
+      getCurrentSettings().perAccountEstimateGB)
   })
 }

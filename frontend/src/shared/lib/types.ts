@@ -306,6 +306,7 @@ export interface ChaoxingApi {
   getBalance(): Promise<Balance>
   /** Live system resources (RAM/CPU/uptime) for the dashboard panel. */
   getSystemResources(): Promise<SystemResources>
+  getMemoryPlan(): Promise<MemoryPlan>
   onProgress(cb: (e: ProgressEvent) => void): () => void
   onPhaseChange(cb: (e: PhaseChangeEvent) => void): () => void
   onLog(cb: (line: { level: string; message: string; timestamp: number }) => void): () => void
@@ -321,6 +322,7 @@ export interface ChaoxingApi {
   editAccount(payload: { index: number; password?: string; website?: string }): Promise<void>
   removeAccount(index: number): Promise<void>
   openFilePicker(): Promise<string | null>
+  getAccountsDefaultPath(): Promise<string>
   removeAllListeners(): void
   /** Release all event listeners registered by this API client instance. */
   dispose(): void

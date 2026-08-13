@@ -6,6 +6,7 @@ describe('computeMemoryPlan', () => {
     const p = computeMemoryPlan(31.8, 14.6, 32)
     expect(p.budgetGB).toBeCloseTo((31.8 - 14.6) * 0.75)
     expect(p.cpuCap).toBe(30)
+    expect(p.memMax).toBe(Math.floor(p.budgetGB / 0.7))
     expect(p.maxConcurrent).toBe(Math.min(p.memMax, p.cpuCap))
     expect(p.systemLimitGB).toBeCloseTo(14.6 + p.budgetGB + 1.0)
   })

@@ -10,7 +10,6 @@ import {
   computeMemoryPlan,
   measureProjectChromeGB,
   measureSystemUsedGB,
-  PYTHON_OVERHEAD_GB,
 } from '../memory/planner'
 import type {
   JobControlPayload,
@@ -388,7 +387,7 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
     }
     const plan = computeMemoryPlan(totalGB, baselineGB, os.cpus().length,
       getCurrentSettings().perAccountEstimateGB)
-    if (plan.budgetGB < PYTHON_OVERHEAD_GB + plan.perAccountEstimateGB) {
+    if (plan.budgetGB < plan.perAccountEstimateGB) {
       throw new Error(`内存预算不足以运行一个浏览器实例（预算 ${plan.budgetGB.toFixed(1)}GB）。`)
     }
 

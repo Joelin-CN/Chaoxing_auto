@@ -9,7 +9,6 @@ from .constants import CHROME_PROFILES_DIR, SHUTDOWN_FLAG
 from .logging_setup import log, signal_stop
 
 BUDGET_RATIO = 0.75
-PYTHON_OVERHEAD_GB = 0.3
 PER_ACCOUNT_INITIAL_GB = 0.7
 EMERGENCY_MARGIN_GB = 1.0
 SAMPLE_INTERVAL_S = 5
@@ -26,7 +25,7 @@ def compute_plan(total_gb: float, baseline_gb: float, threads: int,
     estimate = float(per_account_estimate_gb or PER_ACCOUNT_INITIAL_GB)
     budget_gb = (total_gb - baseline_gb) * BUDGET_RATIO
     cpu_cap = max(2, int(threads) - 2)
-    mem_max = max(1, int((budget_gb - PYTHON_OVERHEAD_GB) // estimate))
+    mem_max = max(1, int(budget_gb // estimate))
     max_concurrent = max(1, min(mem_max, cpu_cap))
     return {
         "total_gb": float(total_gb),

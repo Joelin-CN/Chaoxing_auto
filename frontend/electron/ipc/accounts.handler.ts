@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import path from 'path'
 import { spawn } from 'child_process'
 import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
 import { getCurrentSettings } from './status.handler'
@@ -157,6 +158,10 @@ function requireIdle(): void {
 }
 
 export function registerAccountsHandlers(): void {
+  ipcMain.handle(IPC_CHANNELS.ACCOUNTS_DEFAULT_PATH, () => {
+    return path.join(DATA_DIR, 'passwords', 'chaoxing.txt')
+  })
+
   ipcMain.handle(IPC_CHANNELS.ACCOUNTS_LIST, async () => {
     const parsed = await runAccountsCommand([])
     if (parsed.type !== 'ACCOUNTS') throw new Error('账号列表返回异常。')
