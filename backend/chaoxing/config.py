@@ -19,6 +19,7 @@ Usage:
 """
 
 import json
+import os
 import sys
 import warnings
 from pathlib import Path
@@ -27,6 +28,17 @@ from typing import Any, Optional
 
 from chaoxing.constants import CONFIG_PATH
 from chaoxing.exceptions import ConfigError
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        warnings.warn(f"Ignoring non-integer {name}={raw!r}", UserWarning, stacklevel=3)
+        return default
 
 
 def _warn_unknown_keys(d: dict, known_keys: set, class_name: str):
@@ -58,12 +70,13 @@ class TimeoutConfig:
                                'video_watch', 'quiz_answer', 'section_complete'},
                            'TimeoutConfig')
         return cls(
-            page_load=d.get("page_load", 30),
-            snapshot=d.get("snapshot", 15),
-            click_action=d.get("click_action", 10),
-            video_watch=d.get("video_watch", 60),
-            quiz_answer=d.get("quiz_answer", 120),
-            section_complete=d.get("section_complete", 15),
+            page_load=_env_int("CHAOXING_TIMEOUT_PAGE_LOAD", d.get("page_load", 30)),
+            snapshot=_env_int("CHAOXING_TIMEOUT_SNAPSHOT", d.get("snapshot", 15)),
+            click_action=_env_int("CHAOXING_TIMEOUT_CLICK_ACTION", d.get("click_action", 10)),
+            video_watch=_env_int("CHAOXING_TIMEOUT_VIDEO_WATCH", d.get("video_watch", 60)),
+            quiz_answer=_env_int("CHAOXING_TIMEOUT_QUIZ_ANSWER", d.get("quiz_answer", 120)),
+            section_complete=_env_int("CHAOXING_TIMEOUT_SECTION_COMPLETE",
+                                      d.get("section_complete", 15)),
         )
 
 
@@ -79,8 +92,10 @@ class RetryConfig:
         _warn_unknown_keys(d, {'quiz_max_retries', 'quiz_target_score', 'section_max_retries'},
                            'RetryConfig')
         return cls(
-            quiz_max_retries=d.get("quiz_max_retries", 10),
-            quiz_target_score=d.get("quiz_target_score", 100),
+            quiz_max_retries=_env_int("CHAOXING_RETRY_QUIZ_MAX",
+                                      d.get("quiz_max_retries", 10)),
+            quiz_target_score=_env_int("CHAOXING_RETRY_TARGET_SCORE",
+                                       d.get("quiz_target_score", 100)),
             section_max_retries=d.get("section_max_retries", 3),
         )
 
@@ -184,6 +199,34 @@ class ConfigManager:
         self.playwright_cli = self._raw.get("playwright_cli", "playwright-cli.cmd")
         self.chrome_args = self._raw.get("chrome_args", ["--disable-gpu", "--disable-software-rasterizer"])
         self.max_concurrent = self._raw.get("max_concurrent", 10)
+
+        # Environment overrides (Electron settings → PythonBridge env). Merge
+        # into the legacy _raw dict so BOTH cfg("timeouts.*") and the typed
+        # TimeoutConfig/RetryConfig dataclasses observe the same values.
+        _timeout_env = {
+            "page_load": "CHAOXING_TIMEOUT_PAGE_LOAD",
+            "snapshot": "CHAOXING_TIMEOUT_SNAPSHOT",
+            "click_action": "CHAOXING_TIMEOUT_CLICK_ACTION",
+            "video_watch": "CHAOXING_TIMEOUT_VIDEO_WATCH",
+            "quiz_answer": "CHAOXING_TIMEOUT_QUIZ_ANSWER",
+            "section_complete": "CHAOXING_TIMEOUT_SECTION_COMPLETE",
+        }
+        timeouts_raw = dict(self._raw.get("timeouts", {}))
+        for key, env_name in _timeout_env.items():
+            if os.environ.get(env_name):
+                timeouts_raw[key] = _env_int(env_name, timeouts_raw.get(key, 0))
+        if timeouts_raw:
+            self._raw["timeouts"] = timeouts_raw
+
+        retry_raw = dict(self._raw.get("retry", {}))
+        if os.environ.get("CHAOXING_RETRY_QUIZ_MAX"):
+            retry_raw["quiz_max_retries"] = _env_int(
+                "CHAOXING_RETRY_QUIZ_MAX", retry_raw.get("quiz_max_retries", 10))
+        if os.environ.get("CHAOXING_RETRY_TARGET_SCORE"):
+            retry_raw["quiz_target_score"] = _env_int(
+                "CHAOXING_RETRY_TARGET_SCORE", retry_raw.get("quiz_target_score", 100))
+        if retry_raw:
+            self._raw["retry"] = retry_raw
 
         self.timeouts = TimeoutConfig.from_dict(self._raw.get("timeouts", {}))
         self.retry = RetryConfig.from_dict(self._raw.get("retry", {}))

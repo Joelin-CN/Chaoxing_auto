@@ -597,7 +597,7 @@ const IPC_CHANNELS = {
 - **限流**: 500ms 冷却
 - **校验**:
   - `accountIds`: 必填，最多 50 个，必须为正整数（支持 string → parseInt 转换）
-  - **RAM 安全检查**: 估算每个账号 ~350MB Chromium 内存，最多使用 70% 空闲 RAM。超限返回详细警告。
+  - **RAM 安全检查**: 启动前按 `(总内存 − 基线) × 75%` 与 CPU 线程数计算最大并发，超预算账号排队分批执行；运行中每 5 秒实测收紧。
   - **互斥检查**: 同一时间只允许一个活跃任务
 - **行为**: 创建 Job 记录 → 创建 PythonBridge → 绑定事件 → spawn Python 子进程
 
@@ -908,7 +908,7 @@ interface PythonResultEvent {
 ### 4.1 进程启动
 
 ```
-spawn('python', [scriptPath, '--chromium-flags', '<flags>', ...args], {
+spawn('python', ['-m', 'chaoxing.api', ...args], {
   stdio: ['pipe', 'pipe', 'pipe'],
   env: {
     PYTHONUNBUFFERED: '1',
@@ -917,17 +917,20 @@ spawn('python', [scriptPath, '--chromium-flags', '<flags>', ...args], {
 })
 ```
 
-**入口脚本**: `scripts/chaoxing_orchestrator.py`（后端 repo 提供）
+**入口**: `python -m chaoxing.api`（后端 repo 提供）
 
 **命令行参数**:
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `--chromium-flags` | `string` | Chromium 内存优化参数（空格分隔），由 Bridge 自动注入 |
 | `--job-id` | `string` | 任务唯一标识 |
 | `--accounts` | `string` | 逗号分隔的账号 ID 列表 |
 | `--mode` | `string` | `full` / `scan_only` / `solve_only` |
 | `--courses` | `string` | 逗号分隔的课程 ID 列表（可选） |
+| `--max-concurrent` | `int` | 运行时信号量大小（Electron 按内存/CPU 计划计算） |
+| `--budget-gb` | `float` | 项目内存预算（GB） |
+| `--system-limit-gb` | `float` | 系统已用内存急停阈值 |
+| `--per-account-estimate-gb` | `float` | 初始单 Chrome 实例估算 |
 
 **Chromium 内存优化参数**（由 Bridge 自动注入）:
 ```
@@ -1361,8 +1364,8 @@ npm run typecheck    # 类型检查（vue-tsc 2.x；渲染进程 + Node 侧分�
 ### 后端开发对接
 
 后端开发者在对接时只需关注 **Layer 3 (Python 子进程协议)**：
-1. 入口脚本接收 `--job-id`, `--accounts`, `--mode`, `--courses`, `--chromium-flags` 参数
-2. stdout 按 JSON-line 格式输出 7 种事件类型
+1. 入口接收 `--job-id`, `--accounts`, `--mode`, `--courses`, `--max-concurrent`, `--budget-gb`, `--system-limit-gb`, `--per-account-estimate-gb` 参数
+2. stdout 按 JSON-line 格式输出 8 种事件类型（含 `MEMORY`）
 3. stdin 接收 `PAUSE` / `RESUME` / `STOP` 控制信号
 4. 遵守 2 小时超时和优雅停止协议
 
@@ -1380,7 +1383,8 @@ PythonBridge 只透传白名单环境变量，防止凭据泄漏：
 白名单: PATH, SYSTEMROOT, SYSTEMDRIVE, TEMP, TMP,
         USERPROFILE, HOMEDRIVE, HOMEPATH,
         PYTHONPATH, PYTHONHOME,
-        CHAOXING_WORKSPACE, CHAOXING_HEADED
+        CHAOXING_WORKSPACE, CHAOXING_DATA_DIR, CHAOXING_HEADED,
+        CHAOXING_ACCOUNTS_FILE, CHAOXING_TIMEOUT_*, CHAOXING_RETRY_*
 强制设置: PYTHONUNBUFFERED=1
 ```
 
@@ -1391,7 +1395,7 @@ PythonBridge 只透传白名单环境变量，防止凭据泄漏：
 - `accountIds`: 必须为正整数数组，最大 50 个（接受 string → parseInt 转换）
 - `courseIds`: 字符串数组
 - `mode`: 限制为 `full` / `scan_only` / `solve_only`
-- **RAM 安全检查**: 每个账号预估 350MB Chromium 内存，最多使用 70% 空闲 RAM，超限返回详细中文警告
+- **RAM 安全检查**: 按当前机器内存与 CPU 动态计算并发上限，运行中实时采样收紧
 - 所有 IPC 调用: 500ms 速率限制
 
 ### 进程安全
@@ -1551,7 +1555,7 @@ try {
 
 后端（Python 脚本）开发者接入时应确保：
 
-- [ ] 入口脚本接收 `--job-id`, `--accounts`, `--mode`, `--courses`, `--chromium-flags` 命令行参数
+- [ ] 入口脚本接收 `--job-id`, `--accounts`, `--mode`, `--courses`, `--max-concurrent`, `--budget-gb`, `--system-limit-gb`, `--per-account-estimate-gb` 命令行参数
 - [ ] stdout 所有输出为 JSON-line 格式（每行一个 JSON 对象）
 - [x] 每个 JSON 对象包含 `type` 字段（`PROGRESS` / `PHASE` / `LOG` / `TICKET` / `RESULT` / `ERROR` / `DONE`）
 - [ ] `PROGRESS` 事件包含 `jobId`, `percent` (0-100), `message`

@@ -213,9 +213,6 @@ export interface Settings {
   maxConcurrency: number
   quizSolver: AIProvider
   quizRetryCount: number
-  videoSpeed: number
-  sectionDelay: number // ms between sections
-  autoResolveCaptcha: boolean
   logRetention: number // days
   notifications: boolean
   debugMode: boolean
@@ -224,6 +221,12 @@ export interface Settings {
   accountsFilePath: string
   concurrencyTarget: number | null
   perAccountEstimateGB: number
+  pythonPath: string
+  pageLoadTimeout: number
+  snapshotTimeout: number
+  clickTimeout: number
+  videoWatchTimeout: number
+  quizAnswerTimeout: number
 }
 
 export interface BackendSettings {

@@ -2,6 +2,28 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-08-13（续）— 设置项落地与文档校正
+
+### 新增
+- 「浏览器与系统」设置：Python 解释器路径、页面加载/快照/点击/视频观看/答题
+  五项超时、日志保留天数；超时与重试通过 `CHAOXING_TIMEOUT_*` /
+  `CHAOXING_RETRY_*` 环境变量注入后端（`config.py` 同时覆盖 legacy `cfg()` 与
+  类型化配置）。
+- 任务完成/异常时按「系统通知」开关推送 Electron 桌面通知；应用启动时按
+  「日志保留」清理 `data/logs/*.log`。
+- 前端关键设置操作（保存 AI 配置、账号增删改、切换账号文件、内存计划失败）
+  写入日志面板与后端每日日志（账号掩码、密钥不落盘）。
+
+### 移除
+- 死开关：`autoResolveCaptcha` / `autoResolve`（后端无消费）、`videoSpeed`、
+  `sectionDelay`（无后端对应），从类型与设置页摘除；验证码仍由后端按需自动
+  识别，失败走人工工单。
+
+### 文档
+- 三份 README 与 `docs/design/api.md` 同步：`--chromium-flags` 移除、动态并发
+  公式、新增 IPC 通道与 `MEMORY` 事件、deepseek-web 已不支持、真实数据接入
+  现状、测试数量 578。
+
 ## 2026-08-13 — 前端鲁棒性与内存感知并发
 
 ### 新增

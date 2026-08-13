@@ -150,11 +150,19 @@ export interface Settings {
   quizSolver: 'deepseek' | 'doubao' | 'local'
   deepseekModel: string
   doubaoModel: string
-  autoResolve: boolean
   logLevel: 'debug' | 'info' | 'warn' | 'error'
   accountsFilePath: string
   concurrencyTarget: number | null
   perAccountEstimateGB: number
+  notifications: boolean
+  logRetention: number
+  pageLoadTimeout: number
+  snapshotTimeout: number
+  clickTimeout: number
+  videoWatchTimeout: number
+  quizAnswerTimeout: number
+  quizRetryCount: number
+  targetAccuracy: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -168,11 +176,19 @@ export const DEFAULT_SETTINGS: Settings = {
   quizSolver: 'deepseek',
   deepseekModel: 'deepseek-v4-pro',
   doubaoModel: 'doubao-pro',
-  autoResolve: true,
   logLevel: 'info',
   accountsFilePath: '',
   concurrencyTarget: null,
   perAccountEstimateGB: 0.7,
+  notifications: true,
+  logRetention: 7,
+  pageLoadTimeout: 30,
+  snapshotTimeout: 15,
+  clickTimeout: 10,
+  videoWatchTimeout: 60,
+  quizAnswerTimeout: 120,
+  quizRetryCount: 10,
+  targetAccuracy: 100,
 }
 
 export interface Ticket {

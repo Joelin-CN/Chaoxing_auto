@@ -149,7 +149,7 @@ chaoxing.(xuexitong\
 │   ├── chaoxing_YYYYMMDD.log
 │   └── chaoxing_errors_YYYYMMDD.log
 └── tests/                     # 测试套件
-    └── unit/                  # 单元测试（536 pass / 541，5 个为预存无关失败）
+    └── unit/                  # 单元测试（578 pass / 578）
 ```
 
 ### 路径架构说明
@@ -181,7 +181,7 @@ chaoxing.(xuexitong\
   "playwright_cli": "playwright-cli.cmd",
   "ai": {
     "provider": "doubao-api",
-    "comment": "doubao-api (fast HTTP) or deepseek-web (browser automation)"
+    "comment": "doubao-api (fast HTTP, 唯一支持的 provider)"
   },
   "courses": [
     {
@@ -216,6 +216,10 @@ chaoxing.(xuexitong\
 | `timeouts.video_watch` | 视频观看时长(秒) | 60 |
 | `retry.quiz_max_retries` | 每题最大重试 | 10 |
 | `retry.quiz_target_score` | 目标正确率(%) | 100 |
+
+> 前端「系统设置」页会通过环境变量覆盖以上超时与重试项
+> （`CHAOXING_TIMEOUT_*` / `CHAOXING_RETRY_*`）；CLI 直跑时仍读
+> `chaoxing_config.json` 的默认值。
 
 ---
 
@@ -263,7 +267,7 @@ solve_quiz(section)
 | 后端 | 类型 | 速度 | 配置 |
 |------|------|------|------|
 | `doubao-api` | HTTP API (OpenAI SDK) | 快 | `ai.provider: "doubao-api"` |
-| `deepseek-web` | 浏览器自动化 | 慢 | `ai.provider: "deepseek-web"` |
+| `deepseek-web` | 浏览器自动化 | 慢 | 已移除，`ai/router.py` 不再支持 |
 
 ---
 
@@ -293,7 +297,7 @@ solve_quiz(section)
 - **ps1 → Python**: 通过 `System.Diagnostics.Process` 启动子进程，stdout/stderr 重定向，`OutputDataReceived` 事件驱动解析
 - **Python → playwright-cli**: `utils.pw()` 封装，自动附加 session + headed 标志，JSON 编码绕过 shell 转义
 - **JS 注入**: 统一 `_run_js_file()` 模式 — 写 temp → `pw_run_code_file` (shell=False) → 清理
-- **AI 路由**: `ai.provider` 配置决定 `doubao-api` (默认) 或 `deepseek-web`，通过 `_get_ai_solver()` 动态选择
+- **AI 路由**: `ai.provider` 目前仅支持 `doubao-api`（`ai/router.py` 工厂校验）
 - **多线程**: Python `threading.Thread` + `threading.local` 隔离 session，`DEEPSEEK_LOCK` 串行化 DeepSeek 访问
 - **暂停/退出**: 统一走 **stdin 控制信号**（`PAUSE`/`RESUME`/`STOP`），Python 在安全点调用 `check_signals()` 检测；旧版基于本地文件标志位（`.pause_flag`/`.quit_flag`，及 `P`/`Q` 文件）的机制已移除
 

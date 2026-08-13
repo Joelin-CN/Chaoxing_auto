@@ -121,7 +121,7 @@ npm run build        # vite build + electron-builder
 | `/course-atlas` | 课程总览 | 账号面板 + 课程网格，扫描与任务启动 |
 | `/execution-studio` | 执行监控 | 状态横幅、阶段步进器、账号泳道 |
 | `/attention-queue` | 关注队列 | 工单分级、结果预测、操作日志 Feed |
-| `/settings` | 系统设置 | AI、浏览器、账号凭据、主题 |
+| `/settings` | 系统设置 | AI 推理、账号管理、浏览器与系统、运行与内存、主题 |
 
 ## 前后端通信契约
 
@@ -129,11 +129,11 @@ npm run build        # vite build + electron-builder
 
 ### Layer 1 — `ChaoxingApi` 接口（Store 层）
 
-字符串 ID、UI 形态类型。`ElectronApiClient` 与 `MockApiClient` 都实现此接口。核心方法：`startJob` / `pauseJob` / `resumeJob` / `stopJob` / `pauseSelected` / `resumeSelected` / `stopSelected` / `getJobStatus` / `scanCourses` / `getCourses` / `getAccounts` / `getAccountStatus` / `getSettings` / `setSettings` / `getTickets` / `resolveTicket` / `resolveCaptcha` / `getBalance` + 事件订阅 `onProgress` / `onPhaseChange` / `onLog` / `onTicket` / `onCompleted` / `onError` / `onResult`。
+字符串 ID、UI 形态类型。`ElectronApiClient` 与 `MockApiClient` 都实现此接口。核心方法：`startJob` / `pauseJob` / `resumeJob` / `stopJob` / `pauseSelected` / `resumeSelected` / `stopSelected` / `getJobStatus` / `scanCourses` / `getCourses` / `getAccounts` / `getAccountStatus` / `getSettings` / `setSettings` / `getTickets` / `resolveTicket` / `resolveCaptcha` / `getBalance` / `getMemoryPlan` / `getAiStatus` / `setAiConfig` / `testAi` / `addAccount` / `editAccount` / `removeAccount` / `openFilePicker` / `getAccountsDefaultPath` + 事件订阅 `onProgress` / `onPhaseChange` / `onLog` / `onTicket` / `onCompleted` / `onError` / `onResult` / `onMemory`。
 
 ### Layer 2 — Electron IPC 协议
 
-数字 ID、后端形态类型。16 个 invoke 通道 + 7 个事件通道：
+数字 ID、后端形态类型。25 个 invoke 通道 + 8 个事件通道：
 
 **Renderer → Main (invoke)**
 
@@ -153,15 +153,20 @@ npm run build        # vite build + electron-builder
 | `tickets:resolve` | `ticketId, resolution` | void |
 | `job:resolve-ticket` | `{ ticketId, accountId, answer? \| action:'skip' }` | void（验证码回传，转 stdin） |
 | `balance:query` | — | `BalanceResult`（余额查询，§4.7） |
+| `ai:status` / `ai:set` / `ai:test` | `{ apiKey?, model }` | AI 配置状态 / 保存 / 连通性测试 |
+| `accounts:add` / `accounts:edit` / `accounts:remove` | 账号载荷 | void（原子写当前账号文件） |
+| `accounts:default-path` | — | 默认账号文件绝对路径 |
+| `memory:plan` | — | 空闲时按当前机器状态计算的并发计划 |
+| `dialog:open-file` | — | 文件选择器结果（账号文件） |
 
-**Main → Renderer (event)**：`on-progress` / `on-phase-change` / `on-log` / `on-ticket` / `on-completed` / `on-error` / `on-result`，载荷为对应的 `Python*Event` 原始对象。
+**Main → Renderer (event)**：`on-progress` / `on-phase-change` / `on-log` / `on-ticket` / `on-completed` / `on-error` / `on-result` / `on-memory`，载荷为对应的 `Python*Event` 原始对象。
 
 ### Layer 3 — Python 子进程协议
 
 **命令行入口**（`python -m chaoxing.api`，cwd = `backend/`）：
 
 ```
-python -m chaoxing.api --chromium-flags "<flags>" --job-id <id> --accounts <csv> --mode <full|scan_only|solve_only> [--courses <csv>]
+python -m chaoxing.api --job-id <id> --accounts <csv> --mode <full|scan_only|solve_only> [--courses <csv>] [--max-concurrent <n>] [--budget-gb <gb>] [--system-limit-gb <gb>] [--per-account-estimate-gb <gb>]
 ```
 
 **stdin 控制信号**（逐行）：`PAUSE\n` / `RESUME\n` / `STOP\n`
@@ -199,6 +204,6 @@ python -m chaoxing.api --chromium-flags "<flags>" --job-id <id> --accounts <csv>
 ## 安全与稳定性要点
 
 - **环境变量白名单**：PythonBridge 仅透传系统基础变量 + `CHAOXING_WORKSPACE` / `CHAOXING_DATA_DIR` / `CHAOXING_HEADED`，显式排除 `ARK_API_KEY` 等凭据。
-- **RAM 安全检查**：每账号预估 ~350MB Chromium 内存，最多使用 70% 空闲内存，超限抛出中文警告。
+- **RAM 安全检查**：任务启动前按 `(总内存 − 基线) × 75%` 与 CPU 线程数计算最大并发；运行中每 5 秒实测 Chrome 进程树收紧，超预算账号自动排队分批跑完。
 - **进程治理**：单任务互斥；2 小时硬超时（SIGTERM→SIGKILL）；退出时清理孤儿 Chromium 进程。
 - **渲染进程隔离**：`contextIsolation` + `sandbox` 开启，`nodeIntegration` 关闭，注入 CSP。

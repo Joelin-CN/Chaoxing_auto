@@ -100,6 +100,110 @@
       </div>
     </GlassmorphicPanel>
 
+    <!-- ── 浏览器与系统 ── -->
+    <GlassmorphicPanel class="panel" padding="22px">
+      <h3 class="panel__title">浏览器与系统</h3>
+      <div class="panel__grid">
+        <div class="field">
+          <label class="field__label">Python 路径</label>
+          <p class="field__hint">留空使用系统 PATH 中的 python；推荐指向含 openai 的环境</p>
+          <input
+            type="text"
+            class="field__input field__input--wide"
+            :value="settingsStore.settings.pythonPath"
+            placeholder="python"
+            @change="settingsStore.updateSetting('pythonPath', ($event.target as HTMLInputElement).value)"
+          />
+        </div>
+        <div class="field">
+          <label class="field__label">页面加载超时 (秒)</label>
+          <input
+            type="number"
+            class="field__input"
+            :value="settingsStore.settings.pageLoadTimeout"
+            min="5"
+            max="120"
+            @change="settingsStore.updateSetting('pageLoadTimeout', Number(($event.target as HTMLInputElement).value))"
+          />
+        </div>
+        <div class="field">
+          <label class="field__label">快照超时 (秒)</label>
+          <input
+            type="number"
+            class="field__input"
+            :value="settingsStore.settings.snapshotTimeout"
+            min="5"
+            max="60"
+            @change="settingsStore.updateSetting('snapshotTimeout', Number(($event.target as HTMLInputElement).value))"
+          />
+        </div>
+        <div class="field">
+          <label class="field__label">点击超时 (秒)</label>
+          <input
+            type="number"
+            class="field__input"
+            :value="settingsStore.settings.clickTimeout"
+            min="1"
+            max="30"
+            @change="settingsStore.updateSetting('clickTimeout', Number(($event.target as HTMLInputElement).value))"
+          />
+        </div>
+        <div class="field">
+          <label class="field__label">视频观看超时 (秒)</label>
+          <input
+            type="number"
+            class="field__input"
+            :value="settingsStore.settings.videoWatchTimeout"
+            min="10"
+            max="600"
+            @change="settingsStore.updateSetting('videoWatchTimeout', Number(($event.target as HTMLInputElement).value))"
+          />
+        </div>
+        <div class="field">
+          <label class="field__label">答题超时 (秒)</label>
+          <input
+            type="number"
+            class="field__input"
+            :value="settingsStore.settings.quizAnswerTimeout"
+            min="30"
+            max="600"
+            @change="settingsStore.updateSetting('quizAnswerTimeout', Number(($event.target as HTMLInputElement).value))"
+          />
+        </div>
+        <div class="field">
+          <label class="field__label">日志保留 (天)</label>
+          <input
+            type="number"
+            class="field__input"
+            :value="settingsStore.settings.logRetention"
+            min="1"
+            max="30"
+            @change="settingsStore.updateSetting('logRetention', Number(($event.target as HTMLInputElement).value))"
+          />
+        </div>
+        <div class="field field--row">
+          <div class="field__info">
+            <label class="field__label">无头模式</label>
+            <p class="field__hint">浏览器在后台运行，不显示窗口</p>
+          </div>
+          <Toggle
+            :model-value="settingsStore.settings.headless"
+            @update:model-value="settingsStore.updateSetting('headless', $event)"
+          />
+        </div>
+        <div class="field field--row">
+          <div class="field__info">
+            <label class="field__label">系统通知</label>
+            <p class="field__hint">任务完成或异常时推送桌面通知</p>
+          </div>
+          <Toggle
+            :model-value="settingsStore.settings.notifications"
+            @update:model-value="settingsStore.updateSetting('notifications', $event)"
+          />
+        </div>
+      </div>
+    </GlassmorphicPanel>
+
     <!-- ── 运行与内存 ── -->
     <GlassmorphicPanel class="panel" padding="22px">
       <h3 class="panel__title">运行与内存</h3>
@@ -134,26 +238,6 @@
             max="4"
             step="0.1"
             @change="settingsStore.updateSetting('perAccountEstimateGB', Number(($event.target as HTMLInputElement).value))"
-          />
-        </div>
-        <div class="field field--row">
-          <div class="field__info">
-            <label class="field__label">无头模式</label>
-            <p class="field__hint">浏览器在后台运行，不显示窗口</p>
-          </div>
-          <Toggle
-            :model-value="settingsStore.settings.headless"
-            @update:model-value="settingsStore.updateSetting('headless', $event)"
-          />
-        </div>
-        <div class="field field--row">
-          <div class="field__info">
-            <label class="field__label">系统通知</label>
-            <p class="field__hint">任务完成或异常时推送桌面通知</p>
-          </div>
-          <Toggle
-            :model-value="settingsStore.settings.notifications"
-            @update:model-value="settingsStore.updateSetting('notifications', $event)"
           />
         </div>
       </div>
@@ -514,6 +598,9 @@ function setConcurrency(value: number): void {
   font-size: 14px;
   outline: none;
   max-width: 320px;
+}
+.field__input--wide {
+  max-width: 520px;
 }
 .field__input:focus {
   border-color: var(--accent);

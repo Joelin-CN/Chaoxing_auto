@@ -114,6 +114,13 @@ export class PythonBridge extends EventEmitter {
     if (settings.accountsFilePath) {
       safeEnv.CHAOXING_ACCOUNTS_FILE = settings.accountsFilePath
     }
+    safeEnv.CHAOXING_TIMEOUT_PAGE_LOAD = String(settings.pageLoadTimeout)
+    safeEnv.CHAOXING_TIMEOUT_SNAPSHOT = String(settings.snapshotTimeout)
+    safeEnv.CHAOXING_TIMEOUT_CLICK_ACTION = String(settings.clickTimeout)
+    safeEnv.CHAOXING_TIMEOUT_VIDEO_WATCH = String(settings.videoWatchTimeout)
+    safeEnv.CHAOXING_TIMEOUT_QUIZ_ANSWER = String(settings.quizAnswerTimeout)
+    safeEnv.CHAOXING_RETRY_QUIZ_MAX = String(settings.quizRetryCount)
+    safeEnv.CHAOXING_RETRY_TARGET_SCORE = String(settings.targetAccuracy)
 
     const fullArgs = ['-m', 'chaoxing.api', ...args]
 

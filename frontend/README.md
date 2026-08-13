@@ -11,7 +11,7 @@
 | 框架 | Vue 3.4 (Composition API, `<script setup>`) |
 | 语言 | TypeScript 5（strict） |
 | 构建 | Vite 5 |
-| 状态管理 | Pinia 2（7 个 Store） |
+| 状态管理 | Pinia 2（8 个 Store） |
 | 路由 | Vue Router 4（hash 模式） |
 | 桌面壳 | Electron 28 |
 | 样式 | Scoped CSS + CSS 自定义属性（玻璃拟态，亮/暗双主题） |
@@ -69,13 +69,14 @@ frontend/
 │   ├── env.d.ts                    # 环境/类型声明
 │   ├── app/
 │   │   ├── App.vue                 # 根布局（侧边栏 + router-view + 日志控制台）
-│   │   └── stores/                 # Pinia 状态管理（7 个）
+│   │   └── stores/                 # Pinia 状态管理（8 个）
 │   │       ├── account.store.ts    # 账号列表与选择
 │   │       ├── attention.store.ts  # 工单（去重 + 上限 200）
 │   │       ├── campaign.store.ts   # 任务配置（目标/策略/模式 + 预估）
 │   │       ├── course.store.ts     # 课程（按账号缓存、扫描、选择同步）
 │   │       ├── execution.store.ts  # 任务执行（事件监听、计时器、泳道控制）
 │   │       ├── log.store.ts        # 日志缓冲（上限 500）
+│   │       ├── memory.store.ts     # 内存计划 / MEMORY 事件（预算仪表）
 │   │       └── settings.store.ts   # 系统设置（localStorage + 防抖同步）
 │   ├── router/
 │   │   └── index.ts                # 路由配置（5 条 hash 路由 + lazy load）
@@ -119,7 +120,7 @@ frontend/
 | `/course-atlas` | CourseAtlasView | 账号面板 + 课程网格，扫描与任务启动 |
 | `/execution-studio` | ExecutionStudioView | 实时执行监控（状态横幅、阶段步进、账号泳道） |
 | `/attention-queue` | AttentionQueueView | 工单分级、结果预测、操作日志 Feed |
-| `/settings` | SettingsView | AI / 浏览器 / 账号凭据 / 主题配置 |
+| `/settings` | SettingsView | AI 推理 / 账号管理 / 浏览器与系统 / 运行与内存 / 主题 |
 
 > 任务从 **课程总览 (`/course-atlas`)** 选择账号与课程后启动，没有独立的「任务规划」页面。
 
@@ -150,8 +151,8 @@ CSS 自定义属性驱动，支持亮/暗双主题（设置 → 主题切换）�
 完整契约见 **[../docs/design/api.md](../docs/design/api.md)**，分三层：
 
 1. **Layer 1** — `ChaoxingApi` TypeScript 接口（Store 消费层，字符串 ID、UI 形态类型）
-2. **Layer 2** — Electron IPC 协议（Renderer ↔ Main，数字 ID、后端形态类型，16 个 invoke 通道 + 7 个事件通道）
-3. **Layer 3** — Python 子进程 stdin/stdout NDJSON 协议（控制信号 `PAUSE`/`RESUME`/`STOP`，事件 `PROGRESS`/`PHASE`/`LOG`/`TICKET`/`RESULT`/`ERROR`/`DONE`）
+2. **Layer 2** — Electron IPC 协议（Renderer ↔ Main，数字 ID、后端形态类型，25 个 invoke 通道 + 8 个事件通道）
+3. **Layer 3** — Python 子进程 stdin/stdout NDJSON 协议（控制信号 `PAUSE`/`RESUME`/`STOP`，事件 `PROGRESS`/`PHASE`/`LOG`/`TICKET`/`RESULT`/`ERROR`/`MEMORY`/`DONE`）
 
 `ElectronApiClient`（`ipcClient.ts`）是两套类型系统之间的映射层：账号 ID `string ↔ number`、Course/Settings/Ticket 形态转换、模式与 AI 提供方映射、事件重整。`MockApiClient` 直接实现 Layer 1，不经过 IPC。
 
@@ -159,8 +160,8 @@ CSS 自定义属性驱动，支持亮/暗双主题（设置 → 主题切换）�
 
 - **类型检查**：使用 `vue-tsc 2.x`（兼容 Node 24 + TypeScript 5.9）。旧版 `vue-tsc 1.8` 在 Node 24 下会因补丁 TS 内部字符串失败而崩溃，已升级。`typecheck` 拆成渲染进程（`tsconfig.json`，DOM lib）与 Node 侧（`tsconfig.node.json`，node types）两次执行，避免 DOM/Node 类型冲突与 composite 项目引用问题。
 - **逐账号运行时控制**：Mock 模式完整支持选中账号的 暂停/恢复/停止；Electron 模式下，当选中集合等于任务全部账号时降级为全局控制，**真子集会显式抛错**（当前 Python 后端不支持逐账号控制）。详见 API 文档第 7 节。
-- **数据接入**：`courses:*`、`accounts:*`、`tickets:*` 通道目前返回 Mock/桩数据（含 TODO 标记），仅 `job:*` 与事件通道接入了真实 PythonBridge。
+- **数据接入**：`job:*`、`courses:*`、`accounts:*`、`balance:query` 与全部事件通道已接真实后端；`tickets:list` 与 `accounts:status` 仍为桩数据（真实工单与账号状态走事件流）。
 
 ## 后端仓库
 
-后端（Python 脚本）位于独立仓库，后续将合并到本仓库的 `backend/` 目录。后端接入只需关注 Layer 3：实现 `--job-id / --accounts / --mode / --courses / --chromium-flags` 命令行入口，stdout 输出 NDJSON 事件，stdin 读取控制信号。
+后端位于同仓库 `backend/`。接入只需关注 Layer 3：实现 `--job-id / --accounts / --mode / --courses / --max-concurrent / --budget-gb / --system-limit-gb / --per-account-estimate-gb` 命令行入口，stdout 输出 NDJSON 事件，stdin 读取控制信号。

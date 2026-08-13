@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, Notification } from 'electron'
 import { execSync, execFile } from 'child_process'
 import os from 'os'
 import path from 'path'
@@ -324,6 +324,9 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     job.phase = (event.phase as JobStatus['phase']) ?? 'error'
     markTerminalLanes(job, 'error', job.progress)
     setJobActive(false)
+    if (getCurrentSettings().notifications) {
+      new Notification({ title: '超星助手', body: `任务异常：${event.error}` }).show()
+    }
     sendToRenderer(win, IPC_CHANNELS.ON_ERROR, event)
   })
 
@@ -338,6 +341,9 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     job.finishedAt = new Date().toISOString()
     markTerminalLanes(job, 'completed', 100)
     setJobActive(false)
+    if (getCurrentSettings().notifications) {
+      new Notification({ title: '超星助手', body: '任务已全部完成。' }).show()
+    }
 
     sendToRenderer(win, IPC_CHANNELS.ON_COMPLETED, event)
     activeJobId = null

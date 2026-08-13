@@ -370,10 +370,7 @@ export class MockApiClient implements ChaoxingApi {
       language: 'zh-CN',
       maxConcurrency: 2,
       quizSolver: 'doubao',
-      quizRetryCount: 3,
-      videoSpeed: 2,
-      sectionDelay: 3000,
-      autoResolveCaptcha: false,
+      quizRetryCount: 10,
       logRetention: 7,
       notifications: true,
       debugMode: false,
@@ -382,6 +379,12 @@ export class MockApiClient implements ChaoxingApi {
       accountsFilePath: '',
       concurrencyTarget: null,
       perAccountEstimateGB: 0.7,
+      pythonPath: '',
+      pageLoadTimeout: 30,
+      snapshotTimeout: 15,
+      clickTimeout: 10,
+      videoWatchTimeout: 60,
+      quizAnswerTimeout: 120,
     }
   }
 

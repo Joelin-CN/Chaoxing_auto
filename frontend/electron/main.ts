@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'path'
+import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { execSync } from 'child_process'
 import { registerJobHandlers, stopActiveJob } from './ipc/job.handler'
@@ -10,6 +11,8 @@ import { registerAccountsHandlers } from './ipc/accounts.handler'
 import { registerSystemHandlers } from './ipc/system.handler'
 import { registerDialogHandlers } from './ipc/dialog.handler'
 import { registerAiHandlers } from './ipc/ai.handler'
+import { DATA_DIR } from './backendPath'
+import { getCurrentSettings } from './ipc/status.handler'
 import { ensureWorkspaceSeeded } from './backendPath'
 
 // __dirname is not available in ES modules — reconstruct it
@@ -62,6 +65,21 @@ let isQuitting = false
 
 function getMainWindow(): BrowserWindow | null {
   return mainWindow
+}
+
+function pruneOldLogs(days: number): void {
+  const dir = path.join(DATA_DIR, 'logs')
+  if (!fs.existsSync(dir)) return
+  const cutoff = Date.now() - days * 86_400_000
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.log')) continue
+    const file = path.join(dir, name)
+    try {
+      if (fs.statSync(file).mtimeMs < cutoff) fs.unlinkSync(file)
+    } catch {
+      // A locked log file must never break startup.
+    }
+  }
 }
 
 function createWindow(): BrowserWindow {
@@ -131,6 +149,11 @@ app.whenReady().then(() => {
     ensureWorkspaceSeeded()
   } catch (err) {
     console.error('[workspace] Seeding failed:', err)
+  }
+  try {
+    pruneOldLogs(getCurrentSettings().logRetention)
+  } catch (err) {
+    console.error('[logs] Pruning failed:', err)
   }
   registerAllHandlers()
   mainWindow = createWindow()
