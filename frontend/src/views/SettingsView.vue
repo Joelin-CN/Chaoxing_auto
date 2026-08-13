@@ -234,6 +234,7 @@ import { useSettingsStore } from '@/app/stores/settings.store'
 import { useAccountStore } from '@/app/stores/account.store'
 import { useMemoryStore } from '@/app/stores/memory.store'
 import { useExecutionStore } from '@/app/stores/execution.store'
+import { useLogStore } from '@/app/stores/log.store'
 import { createApiClient, isMockMode } from '@/shared/lib/apiClient'
 import type { Account } from '@/shared/lib/types'
 
@@ -241,6 +242,7 @@ const settingsStore = useSettingsStore()
 const accountStore = useAccountStore()
 const memoryStore = useMemoryStore()
 const executionStore = useExecutionStore()
+const logStore = useLogStore()
 const api = createApiClient()
 
 const mockMode = isMockMode()
@@ -271,6 +273,8 @@ const concurrencyTarget = computed(() => settingsStore.settings.concurrencyTarge
 
 watch(accountsFilePath, (val) => {
   settingsStore.updateSetting('accountsFilePath', val)
+  if (val) logStore.addLog('info', `账号文件已切换：${val}`, '设置')
+  else logStore.addLog('info', '账号文件已恢复默认路径', '设置')
   reloadAccounts()
 })
 
@@ -313,11 +317,13 @@ async function saveAi(): Promise<void> {
     await api.setAiConfig({ apiKey: aiKey.value, model: aiModel.value })
     aiTestMsg.value = '已保存'
     aiTestOk.value = true
+    logStore.addLog('info', 'AI 配置已保存到本地文件（密钥未回显）。', '设置')
     aiKey.value = ''
     aiStatus.value = await api.getAiStatus()
   } catch (e: any) {
     aiTestMsg.value = e?.message ?? '保存失败'
     aiTestOk.value = false
+    logStore.addLog('error', `AI 配置保存失败：${e?.message ?? '未知错误'}`, '设置')
   } finally {
     aiSaving.value = false
   }
@@ -330,9 +336,13 @@ async function testAi(): Promise<void> {
     const r = await api.testAi()
     aiTestOk.value = r.ok
     aiTestMsg.value = r.ok ? '连通性正常' : (r.reason ?? '连接失败')
+    logStore.addLog(r.ok ? 'info' : 'warn',
+      r.ok ? '火山方舟连通性正常。' : `连通性测试失败：${r.reason ?? '未知原因'}`,
+      '设置')
   } catch (e: any) {
     aiTestOk.value = false
     aiTestMsg.value = e?.message ?? '连接失败'
+    logStore.addLog('error', `连通性测试失败：${e?.message ?? '未知错误'}`, '设置')
   } finally {
     aiTesting.value = false
   }
@@ -377,17 +387,20 @@ async function submitAccount(): Promise<void> {
         password: form.value.password,
         website: form.value.website.trim() || undefined,
       })
+      logStore.addLog('info', '账号已添加。', '设置')
     } else if (editing.value) {
       await accountStore.editAccount({
         index: editing.value.id,
         password: form.value.password || undefined,
         website: form.value.website.trim() || undefined,
       })
+      logStore.addLog('info', `账号 ${editing.value.id} 已更新。`, '设置')
     }
     closeEdit()
     await reloadAccounts()
   } catch (e: any) {
     formError.value = e?.message ?? '保存失败'
+    logStore.addLog('error', `账号保存失败：${e?.message ?? '未知错误'}`, '设置')
   }
 }
 
@@ -395,8 +408,10 @@ async function confirmDelete(): Promise<void> {
   if (deleting.value === null) return
   try {
     await accountStore.removeAccount(Number(deleting.value.id))
+    logStore.addLog('info', `已删除账号 ${maskPhone(deleting.value.username)}。`, '设置')
   } catch (e: any) {
     accountsError.value = e?.message ?? '删除失败'
+    logStore.addLog('error', `账号删除失败：${e?.message ?? '未知错误'}`, '设置')
   }
   deleting.value = null
   await reloadAccounts()

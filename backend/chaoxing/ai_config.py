@@ -4,6 +4,7 @@ import json
 import sys
 
 from .ai.doubao import _load_credentials
+from .logging_setup import log
 
 try:
     from openai import OpenAI
@@ -26,8 +27,10 @@ def run_test() -> None:
         client = OpenAI(base_url="https://ark.cn-beijing.volces.com/api/v3",
                         api_key=creds["api_key"], timeout=30, max_retries=0)
         models = client.models.list()
+        log(f"AI connectivity test OK: {len(models.data or [])} models", "OK")
         _write({"type": "AI_TEST", "ok": True, "models": len(models.data or [])})
     except Exception as e:
+        log(f"AI connectivity test failed: {str(e)[:200]}", "ERROR")
         _write({"type": "AI_TEST", "ok": False, "reason": str(e)[:300]})
         sys.exit(1)
 

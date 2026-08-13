@@ -31,6 +31,7 @@ from .platform.auth import (
     _parse_credential_block,
     invalidate_credentials_cache,
 )
+from .logging_setup import log
 
 
 def _write_json_line(obj: dict) -> None:
@@ -102,6 +103,7 @@ def _cmd_add(args) -> None:
     creds.append({"account": args.account, "password": args.password,
                   "website": args.website or "", "index": idx})
     _save(creds)
+    log(f"Account add: index={idx} account={args.account[:3]}***", "OK")
     _write_json_line({"type": "ACCOUNTS_OK", "action": "add",
                       "index": idx, "account": args.account})
 
@@ -115,6 +117,8 @@ def _cmd_edit(args) -> None:
             if args.website is not None:
                 c["website"] = args.website
             _save(creds)
+            log(f"Account edit: index={args.index} account={c['account'][:3]}***",
+                "OK")
             _write_json_line({"type": "ACCOUNTS_OK", "action": "edit",
                               "index": args.index, "account": c["account"]})
             return
@@ -127,6 +131,7 @@ def _cmd_remove(args) -> None:
     if len(creds) == len(before):
         raise ValueError(f"index not found: {args.index}")
     _save(creds)
+    log(f"Account remove: index={args.index}", "OK")
     _write_json_line({"type": "ACCOUNTS_OK", "action": "remove",
                       "index": args.index, "account": None})
 
