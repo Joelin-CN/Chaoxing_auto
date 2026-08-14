@@ -3,6 +3,10 @@
 > 更新于 2026-06-24，基于当前代码 (v17+)  
 > 上次生成: 2026-06-22 (v16)
 
+> ⚠️ **历史参考（2026-06）**：DeepSeek 双引擎已移除，AI 仅支持 Doubao API；主入口已迁移至
+> `python -m chaoxing.api`（JSON-line 协议，Electron 使用）。最新契约见 [api.md](api.md) 与
+> [integration.md](integration.md)。
+
 ---
 
 ## 一、三层架构总览
@@ -444,6 +448,9 @@ AI Provider 默认: `doubao-api` (HTTP API, 快速, 支持多模态)
 ---
 
 ## 十一、运行命令速查
+
+> ⚠️ 以下 `python -m chaoxing.orchestrator --xxx` 与 `scripts/*.py` 直跑方式仅保留向后兼容 shim
+> （`scripts/chaoxing_orchestrator.py`）；主入口为 `python -m chaoxing.api`（Electron JSON-line 协议）。
 
 ```bash
 # === 推荐方式：通过 Python 包入口 ===

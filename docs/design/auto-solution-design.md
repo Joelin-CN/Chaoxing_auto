@@ -2,6 +2,9 @@
 
 > 生成时间: 2026-06-21 | 更新: 2026-06-24 | 账号: 林琦沅 | 学校: 重庆邮电大学
 
+> ⚠️ **历史参考（2026-06）**：DeepSeek 双引擎已移除，AI 仅支持 Doubao API；入口与最新架构见
+> [api.md](api.md) / [architecture.md](architecture.md)。
+
 ---
 
 ## 一、课程总览

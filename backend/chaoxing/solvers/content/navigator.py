@@ -18,6 +18,7 @@ from ...logging_setup import log
 from ...browser.engine import pw_run_code
 from ...browser.js_runner import pw_extract_result
 from ...platform.navigation import pw_goto_course
+from ...utils import human_delay
 
 
 # ── Snapshot Helpers ──────────────────────────────────────────────
@@ -51,13 +52,13 @@ def _click_chapter_tab() -> str:
             const text = (await link.textContent() || '').trim();
             if (text === '章节') {
                 await link.click();
-                await page.waitForTimeout(3000);
+                await page.waitForTimeout(2500 + Math.floor(Math.random() * 1200));
                 return 'clicked';
             }
         }
         try {
             await page.getByRole('link', { name: '章节' }).click();
-            await page.waitForTimeout(3000);
+            await page.waitForTimeout(2500 + Math.floor(Math.random() * 1200));
             return 'clicked-via-role';
         } catch (e) {
             return 'not-found';
@@ -86,12 +87,12 @@ def open_course_chapters(courseid: str, clazzid: str, cpi: str, name: str = None
     if name:
         log(f"Opening course: {name}")
     pw_goto_course(courseid, clazzid, cpi)
-    time.sleep(3)
+    human_delay(3.0, 0.25)
 
     result = _click_chapter_tab()
     if result == "not-found":
         log("Could not find 章节 tab!", "ERROR")
-    time.sleep(2)
+    human_delay(2.0, 0.25)
 
 
 def go_back_to_chapter_tree(courseid: str, clazzid: str, cpi: str) -> bool:
@@ -122,7 +123,7 @@ def go_back_to_chapter_tree(courseid: str, clazzid: str, cpi: str) -> bool:
         # Main page is on studentstudy — navigate directly to course page
         log("    On studentstudy, navigating to course page...")
         pw_goto_course(courseid, clazzid, cpi)
-        time.sleep(3)
+        human_delay(3.0, 0.25)
 
         # Click 章节 tab (default view is 任务) — proven click strategy
         _click_chapter_tab()
@@ -148,7 +149,7 @@ def go_back_to_chapter_tree(courseid: str, clazzid: str, cpi: str) -> bool:
     )
     raw = pw_run_code(js_goto)
     result = pw_extract_result(raw)
-    time.sleep(3)
+    human_delay(3.0, 0.25)
     log(f"    iframe.goto result: {result}")
     return result == "goto-ok"
 
@@ -235,7 +236,7 @@ def navigate_to_section(chapter_num: int, section_num: int) -> bool:
             const text = await link.textContent();
             if (text && text.trim().startsWith('{section_id}')) {{
                 await link.click();
-                await page.waitForTimeout(1000);
+                await page.waitForTimeout(800 + Math.floor(Math.random() * 400));
                 return 'clicked:' + text.trim();
             }}
         }}

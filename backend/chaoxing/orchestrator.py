@@ -35,7 +35,7 @@ from chaoxing.platform.auth import (
     close_chaoxing_browser,
 )
 from chaoxing.platform.scanner import scan_courses, scan_course_sections
-from chaoxing.utils import find_ref_by_text, parse_progress_from_snapshot
+from chaoxing.utils import find_ref_by_text, parse_progress_from_snapshot, human_delay
 from chaoxing.tracking import ProgressTracker
 from chaoxing.discover import (
     build_dynamic_course_config,
@@ -49,6 +49,10 @@ from chaoxing.solvers.content.bot import ChapterContentBot
 # ══════════════════════════════════════════════════════════════════
 #  Session / Login helpers
 # ══════════════════════════════════════════════════════════════════
+
+class AccountRunError(RuntimeError):
+    """Raised when one or more account lanes finished with a hard failure."""
+
 
 def ensure_logged_in(account_index: int = 0) -> bool:
     """Verify the browser session is still on the Chaoxing personal space.
@@ -70,6 +74,12 @@ def ensure_logged_in(account_index: int = 0) -> bool:
         snap = pw_snapshot()
     except Exception as e:
         log(f"Browser session appears dead ({e}), re-creating...", "WARN")
+        # The session may still be listed by playwright-cli, so close it
+        # explicitly before login reopens a fresh one (stale-session fix).
+        try:
+            close_chaoxing_browser(account_index)
+        except Exception:
+            pass
         return chaoxing_login(account_index)
 
     # 2. Check what page we're on
@@ -85,7 +95,7 @@ def ensure_logged_in(account_index: int = 0) -> bool:
     # 4. Unknown page — try navigating to personal space
     log("Unknown page, navigating to personal space...", "WARN")
     pw_goto("https://i.chaoxing.com/")
-    time.sleep(3)
+    human_delay(3.0, 0.25)
     snap = pw_snapshot()
     if "用户登录" in snap or "passport2" in snap:
         return chaoxing_login(account_index)
@@ -211,7 +221,7 @@ def run_for_account(account_index: int, creds: dict, args):
         else:
             log(f"[Account {account_index}] Auto-login failed.", "ERROR")
             progress(account_index, "LOGIN FAILED")
-            return
+            return False
     progress(account_index, "Logged in ✓")
 
     # ── Step 2: Discover courses ──
@@ -263,7 +273,7 @@ def run_for_account(account_index: int, creds: dict, args):
         save_discovered_state(dynamic_courses)
         progress(account_index, f"DONE — {len(dynamic_courses)} courses",
                  len(dynamic_courses), len(dynamic_courses))
-        return
+        return True
 
     # Save discovered state for resume support
     save_discovered_state(dynamic_courses)
@@ -323,6 +333,7 @@ def run_for_account(account_index: int, creds: dict, args):
     log(f"[Account {account_index}] {'='*60}")
     progress(account_index, f"DONE — {total_courses} courses",
              total_courses, total_courses)
+    return True
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -334,7 +345,8 @@ _THREAD_STAGGER_SECONDS = 0.5
 
 
 def _run_account_in_thread(account_index: int, creds: dict, args, semaphore,
-                           monitor, budget_gb, initial_estimate_gb):
+                           monitor, budget_gb, initial_estimate_gb,
+                           results: list = None, results_lock=None):
     """Thread target: wraps run_for_account with exception handling.
 
     Sets the thread name for logging. Catches all exceptions so one
@@ -342,7 +354,9 @@ def _run_account_in_thread(account_index: int, creds: dict, args, semaphore,
 
     Waits on the runtime-sized semaphore, then checks the live memory
     budget before opening a browser. budget_gb=None disables the live gate
-    (CLI runs fall back to the semaphore alone).
+    (CLI runs fall back to the semaphore alone). ``results`` (when provided)
+    collects each lane's final outcome so a hard account failure can surface
+    to the job instead of being swallowed.
     """
     tname = f"chaoxing-account-{account_index}"
     threading.current_thread().name = tname
@@ -352,6 +366,8 @@ def _run_account_in_thread(account_index: int, creds: dict, args, semaphore,
     try:
         if SHUTDOWN_FLAG.is_set():
             progress(account_index, "Skipped (shutdown)", lane_status="error")
+            _record_thread_result(results, results_lock, account_index,
+                                  ok=True, reason="skipped (shutdown)")
             return
 
         if budget_gb is not None:
@@ -366,22 +382,31 @@ def _run_account_in_thread(account_index: int, creds: dict, args, semaphore,
                     break
                 log(f"Account {account_index}: memory budget full, waiting...",
                     "WARN")
-                time.sleep(_GATE_RETRY_SECONDS)
+                human_delay(_GATE_RETRY_SECONDS, 0.2)
             if SHUTDOWN_FLAG.is_set():
                 progress(account_index, "Skipped (shutdown)", lane_status="error")
+                _record_thread_result(results, results_lock, account_index,
+                                      ok=True, reason="skipped (shutdown)")
                 return
 
         if monitor:
             monitor.adjust_active_count(+1)
         progress(account_index, "Starting", lane_status="running")
-        run_for_account(account_index, creds, args)
+        ok = run_for_account(account_index, creds, args)
+        _record_thread_result(results, results_lock, account_index,
+                              ok=ok is not False,
+                              reason=None if ok is not False else "login failed")
     except KeyboardInterrupt:
         log(f"Interrupted by user", "WARN")
         SHUTDOWN_FLAG.set()
+        _record_thread_result(results, results_lock, account_index,
+                              ok=True, reason="stopped by user")
     except Exception as e:
         log(f"Fatal error in thread for account {account_index}: {e}", "ERROR")
         log_exception(f"Account {account_index}: thread crash", exc=e)
         progress(account_index, "FAILED", lane_status="error")
+        _record_thread_result(results, results_lock, account_index,
+                              ok=False, reason=str(e))
     finally:
         if monitor:
             monitor.adjust_active_count(-1)
@@ -395,6 +420,19 @@ def _run_account_in_thread(account_index: int, creds: dict, args, semaphore,
         except Exception as e:  # never let cleanup mask the real outcome
             log(f"Account {account_index}: browser close failed: {e}", "WARN")
         semaphore.release()
+
+
+def _record_thread_result(results, results_lock, account_index: int,
+                          ok: bool, reason):
+    """Append one account lane's outcome to the shared results list."""
+    if results is None:
+        return
+    with results_lock:
+        results.append({
+            "accountIndex": account_index,
+            "ok": ok,
+            "reason": reason,
+        })
 
 
 class RunConfig:
@@ -418,7 +456,8 @@ class RunConfig:
 
 def run_multi_account(account_indices: list[int], mode: str = "full",
                       course: str = None, grade_only: bool = False,
-                      content_only: bool = False, max_concurrent: int = None,
+                      content_only: bool = False, dry_run: bool = False,
+                      resume: bool = False, max_concurrent: int = None,
                       budget_gb: float = None, system_limit_gb: float = None,
                       per_account_estimate_gb: float = None):
     """Run orchestrator for multiple accounts in parallel threads.
@@ -433,6 +472,8 @@ def run_multi_account(account_indices: list[int], mode: str = "full",
         course: Optional course name filter (substring match).
         grade_only: "模拟运行" — solve/fill/AI-grade but never submit.
         content_only: Skip quiz phase, only complete content (仅内容).
+        dry_run: Pure simulation — no submissions, no content completion.
+        resume: Reuse the previously persisted discovery state when present.
         max_concurrent: Runtime semaphore size (Electron-computed); defaults
             to config max_concurrent.
         budget_gb: Project memory budget; None disables the live gate.
@@ -461,11 +502,11 @@ def run_multi_account(account_indices: list[int], mode: str = "full",
     # Build RunConfig from mode
     scan_only = mode == "scan_only"
     solve_only = mode == "solve_only"
-    dry_run = False
 
     config = RunConfig(
         course=course,
         dry_run=dry_run,
+        resume=resume,
         scan_only=scan_only,
         quiz_only=solve_only,
         content_only=content_only,
@@ -495,19 +536,21 @@ def run_multi_account(account_indices: list[int], mode: str = "full",
         monitor.start()
 
     threads = []
+    results: list = []
+    results_lock = threading.Lock()
     try:
         for cred in accounts_to_run:
             t = threading.Thread(
                 target=_run_account_in_thread,
                 args=(cred["index"], cred, config, semaphore, monitor,
-                      budget_gb, initial_estimate),
+                      budget_gb, initial_estimate, results, results_lock),
                 name=f"chaoxing-account-{cred['index']}",
                 daemon=False,
             )
             t.start()
             threads.append(t)
             log(f"Started thread for account [{cred['index']}]")
-            time.sleep(_THREAD_STAGGER_SECONDS)
+            human_delay(_THREAD_STAGGER_SECONDS, 0.5)
 
         try:
             for t in threads:
@@ -528,6 +571,18 @@ def run_multi_account(account_indices: list[int], mode: str = "full",
     finally:
         if monitor:
             monitor.stop()
+
+    # A hard account failure (login failure or thread crash) must not be
+    # reported as a successful job. A user stop (SHUTDOWN_FLAG) is not failure.
+    if not SHUTDOWN_FLAG.is_set():
+        failures = [r for r in results if not r["ok"]]
+        if failures:
+            detail = "; ".join(
+                f"account {r['accountIndex']} ({r['reason'] or 'unknown error'})"
+                for r in failures
+            )
+            raise AccountRunError(
+                f"{len(failures)} account(s) failed: {detail}")
 
     log(f"\n{'='*60}")
     log(f"Multi-account run complete. {len(threads)} account(s) processed.")

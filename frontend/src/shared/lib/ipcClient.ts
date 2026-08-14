@@ -230,6 +230,7 @@ export class ElectronApiClient implements ChaoxingApi {
       id: String(account.id),
       username: account.username,
       displayName: account.nickname ?? account.username,
+      website: account.website ?? '',
       status: account.enabled ? 'online' : 'offline',
       avatar: account.avatar,
     }))

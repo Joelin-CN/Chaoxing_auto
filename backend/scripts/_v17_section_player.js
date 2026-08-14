@@ -401,25 +401,34 @@ async (page) => {
         debugLog.push('V17 seq-start[' + i + '] ' + vidName);
 
         // ── 3a: Click play + mute + auto-resume on pause (reference script approach) ──
-        try {
-            // Click the big play button first
-            const btn = vfs[i].locator('.vjs-big-play-button').first();
-            if (await btn.count() > 0) {
-                await btn.click({timeout: 3000});
-            }
-            // Mute + play (reference script line 1098-1100)
-            await vfs[i].evaluate(() => {
-                const v = document.querySelector('video');
-                if (v) {
-                    v.muted = true;
-                    try { v.play(); } catch(e) {}
+        let playTried = 0;
+        let playStarted = false;
+        while (!playStarted && playTried < 3) {
+            try {
+                // Click the big play button first
+                const btn = vfs[i].locator('.vjs-big-play-button').first();
+                if (await btn.count() > 0) {
+                    await btn.click({timeout: 3000});
                 }
-            });
-            debugLog.push('V17 clicked play[' + i + ']');
-        } catch(e) {
-            debugLog.push('V17 click-err[' + i + ']: ' + e.message);
-            continue;
+                // Mute + play (reference script line 1098-1100)
+                await vfs[i].evaluate(() => {
+                    const v = document.querySelector('video');
+                    if (v) {
+                        v.muted = true;
+                        try { v.play(); } catch(e) {}
+                    }
+                });
+                playStarted = true;
+                debugLog.push('V17 clicked play[' + i + ']');
+            } catch(e) {
+                playTried++;
+                debugLog.push('V17 click-err[' + i + '] try=' + playTried + ': ' + e.message);
+                if (playTried < 3) {
+                    await page.waitForTimeout(1800 + Math.floor(Math.random() * 1400));
+                }
+            }
         }
+        if (!playStarted) continue;
 
         // ── 3b: Auto-resume on pause (reference script: 3s delay, line 128-134) ──
         try {
@@ -430,7 +439,7 @@ async (page) => {
                     v.addEventListener('pause', () => {
                         setTimeout(() => {
                             try { v.play(); } catch(e) {}
-                        }, 3000);
+                        }, 2500 + Math.floor(Math.random() * 1500));
                     });
                 }
             });
@@ -439,7 +448,7 @@ async (page) => {
         // ── 3c: Get actual duration ──
         let dur = attachments[i]?.duration || 0;
         for (let a = 0; a < 5; a++) {
-            await page.waitForTimeout(2000);
+            await page.waitForTimeout(1600 + Math.floor(Math.random() * 900));
             try {
                 const d = await vfs[i].evaluate(() => {
                     const v = document.querySelector('video');
@@ -457,15 +466,44 @@ async (page) => {
         debugLog.push('V17 wait[' + i + ']=' + waitSeconds + 's cycles=' + pollCycles);
 
         let videoCompleted = false;
+        let guardWallTs = 0;
+        let guardCurrent = 0;
         for (let t = 0; t < pollCycles; t++) {
-            await page.waitForTimeout(5000);
+            await page.waitForTimeout(4500 + Math.floor(Math.random() * 1500));
 
-            // Auto-resume if paused (belt-and-suspenders with the event listener)
+            // Auto-resume if paused + stall guard: if currentTime stops
+            // advancing for ~20s (buffering, silent pause, autoplay block),
+            // force a muted replay instead of waiting out the whole duration.
             try {
-                await vfs[i].evaluate(() => {
+                const st = await vfs[i].evaluate(() => {
                     const v = document.querySelector('video');
-                    if (v && v.paused) { try { v.play(); } catch(e) {} }
+                    if (!v) return {paused: true, current: 0};
+                    if (v.paused) {
+                        try { v.play(); } catch(e) {}
+                        return {paused: true, current: v.currentTime};
+                    }
+                    return {paused: false, current: v.currentTime};
                 });
+                if (!st.paused) {
+                    if (guardWallTs === 0) {
+                        guardWallTs = Date.now();
+                        guardCurrent = st.current;
+                    } else if (Math.abs(st.current - guardCurrent) < 0.05
+                               && Date.now() - guardWallTs >= 20000) {
+                        debugLog.push('V17 stall-guard: no progress for 20s, re-triggering play');
+                        await vfs[i].evaluate(() => {
+                            const v = document.querySelector('video');
+                            if (v) { v.muted = true; try { v.play(); } catch(e) {} }
+                        });
+                        guardWallTs = Date.now();
+                        guardCurrent = st.current;
+                    } else if (Math.abs(st.current - guardCurrent) >= 0.05) {
+                        guardWallTs = Date.now();
+                        guardCurrent = st.current;
+                    }
+                } else {
+                    guardWallTs = 0;
+                }
             } catch(e) {}
 
             // ── CAPTCHA Detection (every ~30s) ──

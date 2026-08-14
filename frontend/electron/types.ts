@@ -2,6 +2,7 @@ export interface Account {
   id: number
   username: string
   nickname?: string
+  website?: string
   avatar?: string
   school?: string
   enabled: boolean
@@ -147,9 +148,7 @@ export interface Settings {
   maxWorkers: number
   headless: boolean
   browserTimeout: number
-  quizSolver: 'deepseek' | 'doubao' | 'local'
-  deepseekModel: string
-  doubaoModel: string
+  quizSolver: 'doubao'
   logLevel: 'debug' | 'info' | 'warn' | 'error'
   accountsFilePath: string
   concurrencyTarget: number | null
@@ -166,16 +165,13 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  // Recommended interpreter: the dedicated conda env with volcengine-python-sdk
-  // installed (created for the balance query). Overridable via a custom
-  // Settings.pythonPath or the CHAOXING_BALANCE_PYTHON environment variable.
-  pythonPath: 'E:\\Softwares\\Anaconda\\envs\\chaoxing-backend\\python.exe',
+  // Empty means "python on PATH". Users with a dedicated conda env (e.g.
+  // chaoxing-backend for the balance query) can set it in Settings.
+  pythonPath: '',
   maxWorkers: 2,
   headless: true,
   browserTimeout: 30000,
-  quizSolver: 'deepseek',
-  deepseekModel: 'deepseek-v4-pro',
-  doubaoModel: 'doubao-pro',
+  quizSolver: 'doubao',
   logLevel: 'info',
   accountsFilePath: '',
   concurrencyTarget: null,

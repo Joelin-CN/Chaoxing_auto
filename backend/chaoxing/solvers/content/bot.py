@@ -19,6 +19,7 @@ from typing import Optional
 from ...constants import OUTPUT_DIR
 from ...logging_setup import log, check_signals
 from ...browser.engine import pw_snapshot
+from ...utils import human_delay
 from .navigator import (
     open_course_chapters,
     go_back_to_chapter_tree,
@@ -159,7 +160,7 @@ class ChapterContentBot:
             return "failed"
 
         # Wait for content to load
-        time.sleep(3)
+        human_delay(3.0, 0.25)
 
         # Detect content type and dispatch to handler
         content_type = detect_content_type()
@@ -276,7 +277,7 @@ class ChapterContentBot:
                         # Extra delay every 3 sections
                         delay = min(self.ANTI_SPIDER_DELAY + section_count * 5, self.ANTI_SPIDER_MAX_DELAY)
                         log(f"    Anti-spider delay: {delay}s...")
-                        time.sleep(delay)
+                        human_delay(delay, 0.15)
 
                     result = self.complete_section(ch_num, sec_num, tasks)
                     section_count += 1

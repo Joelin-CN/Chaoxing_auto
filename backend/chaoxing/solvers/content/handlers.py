@@ -28,6 +28,7 @@ from ...browser.js_runner import pw_run_code_file, pw_extract_result
 from ...platform.navigation import pw_goto_course
 from ...platform.captcha import solve_captcha_image, captcha_paths_for_session
 from .navigator import find_ref_by_text
+from ...utils import human_delay
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -63,7 +64,7 @@ def _try_force_complete() -> bool:
     )
     if safe_ref:
         pw_click(safe_ref)
-        time.sleep(2)
+        human_delay(2.0, 0.25)
         return True
 
     # "下一节" causes redirect — avoid unless no other option
@@ -71,7 +72,7 @@ def _try_force_complete() -> bool:
     if next_ref:
         log("    Only found '下一节' — will cause page redirect", "WARN")
         pw_click(next_ref)
-        time.sleep(3)
+        human_delay(3.0, 0.25)
         return True
 
     return False
@@ -87,7 +88,7 @@ def return_to_course_page(courseid: str, clazzid: str, cpi: str):
     """
     log("    Returning to course page...")
     pw_goto_course(courseid, clazzid, cpi)
-    time.sleep(3)
+    human_delay(3.0, 0.25)
     log("    Returned to course page")
 
 
@@ -415,7 +416,7 @@ def check_anti_spider() -> bool:
                 const tb = page.getByRole('textbox', {{name: '输入验证码'}});
                 await tb.fill('{answer}');
                 await page.getByRole('button', {{name: '提交'}}).click();
-                await page.waitForTimeout(3000);
+                await page.waitForTimeout(2500 + Math.floor(Math.random() * 1200));
                 return page.url().includes('antispider') ? 'still-captcha' : 'solved';
             }}
             """
@@ -440,7 +441,7 @@ def check_anti_spider() -> bool:
             except Exception:
                 pass
             log("  CAPTCHA auto-solved!", "OK")
-            time.sleep(3)
+            human_delay(3.0, 0.25)
             return True
 
     # ── Fallback: wait for manual solve ──
@@ -471,7 +472,7 @@ def check_anti_spider() -> bool:
 
     log("  Waiting for manual solve (frontend ticket or headed Chrome window)...")
     for i in range(120):  # Up to 10 minutes
-        time.sleep(5)
+        human_delay(5.0, 0.15)
 
         # Check for answer file (frontend RESOLVE_TICKET writes this)
         if os.path.exists(captcha_answer):
@@ -970,7 +971,7 @@ class DocumentHandler(ContentHandler):
         }
         """
         pw_run_code(js)
-        time.sleep(3)
+        human_delay(3.0, 0.25)
 
         snap = pw_snapshot()
         return "completed" if _is_section_complete(snap) else "failed"
@@ -1003,7 +1004,7 @@ class AudioHandler(ContentHandler):
         while time.time() - start < content_timeout:
             # Yield point: responsive pause/stop/RAM-guard during long video waits.
             check_signals()
-            time.sleep(5)
+            human_delay(5.0, 0.15)
             snap = pw_snapshot()
             if _is_section_complete(snap):
                 return "completed"
@@ -1025,7 +1026,7 @@ class GenericHandler(ContentHandler):
     def handle(self, bot, chapter_num: int, section_num: int,
                task_count: int) -> str:
         log("    Handling generic content...")
-        time.sleep(5)
+        human_delay(5.0, 0.15)
 
         # Try scrolling to bottom
         js = """
@@ -1038,7 +1039,7 @@ class GenericHandler(ContentHandler):
         }
         """
         pw_run_code(js)
-        time.sleep(3)
+        human_delay(3.0, 0.25)
 
         snap = pw_snapshot()
         return "completed" if _is_section_complete(snap) else "failed"

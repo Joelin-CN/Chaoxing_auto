@@ -65,6 +65,13 @@ def test_measure_project_chrome_parses_ps_output(monkeypatch):
         1234567890 / 1024 ** 3)
 
 
+def test_measure_project_chrome_no_process_returns_zero(monkeypatch):
+    """No matching chrome.exe should report 0 GB, not a probe failure."""
+    fake = subprocess.CompletedProcess([], 0, stdout="0\n", stderr="")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: fake)
+    assert measure_project_chrome_gb("C:\\profiles") == 0.0
+
+
 def test_measure_project_chrome_raises_on_failure(monkeypatch):
     fake = subprocess.CompletedProcess([], 1, stdout="", stderr="boom")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: fake)

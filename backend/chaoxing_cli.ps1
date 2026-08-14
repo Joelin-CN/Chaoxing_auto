@@ -36,9 +36,10 @@ $env:PYTHONUTF8 = "1"
 # (has volcengine-python-sdk for the balance query) > python on PATH.
 function Resolve-PythonExe {
     if ($env:CHAOXING_PYTHON -and (Test-Path $env:CHAOXING_PYTHON)) { return $env:CHAOXING_PYTHON }
-    $condaEnv = "E:\Softwares\Anaconda\envs\chaoxing-backend\python.exe"
-    if (Test-Path $condaEnv) { return $condaEnv }
-    return "python"
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    Write-Host "  [ERROR] 未找到 Python。请安装 Python 3.10+，或设置 CHAOXING_PYTHON 环境变量指向解释器。" -ForegroundColor Red
+    exit 1
 }
 
 # ── Banner ──────────────────────────────────────────────────────
@@ -59,63 +60,10 @@ function Show-Menu {
     Write-Host "    [4] complete-content   完成视频/文档/音频内容"
     Write-Host "    [5] full-auto          全自动处理 (答题+内容)"
     Write-Host "    [6] batch-test         批量测试 (Phase C 验证)"
-    Write-Host "    [K] keyboard-monitor   启动键盘监听 (P暂停/Q退出)"
     Write-Host "    [Q] 退出"
     Write-Host ""
-}
-
-# ── Cleanup stale flags ─────────────────────────────────────────
-function Clear-Flags {
-    Remove-Item "$ScriptRoot\.pause_flag" -ErrorAction SilentlyContinue
-    Remove-Item "$ScriptRoot\.quit_flag" -ErrorAction SilentlyContinue
-}
-
-# ── Keyboard Monitor (background Runspace) ──────────────────────
-function Start-KeyboardMonitor {
-    Clear-Flags
-    Write-Host "  [键盘监听] P=暂停/继续  Q=优雅退出  (按 Ctrl+C 停止监听)" -ForegroundColor Magenta
+    Write-Host "  执行过程中: P = 暂停/继续   Q = 优雅停止"
     Write-Host ""
-
-    $monitorScript = {
-        param($Root)
-        Add-Type -AssemblyName System.Windows.Forms
-        while ($true) {
-            if ([System.Windows.Forms.Form]::ActiveForm -ne $null) {
-                # Don't interfere with active forms
-                Start-Sleep -Milliseconds 200
-                continue
-            }
-            if ([Console]::KeyAvailable) {
-                $key = [Console]::ReadKey($true)
-                switch ($key.Key) {
-                    'P' {
-                        if (Test-Path "$Root\.pause_flag") {
-                            Remove-Item "$Root\.pause_flag" -Force
-                            Write-Host "`n  ▶ 继续执行" -ForegroundColor Green
-                        } else {
-                            New-Item -ItemType File -Path "$Root\.pause_flag" -Force | Out-Null
-                            Write-Host "`n  ⏸ 暂停中 — 按 P 继续" -ForegroundColor Yellow
-                        }
-                    }
-                    'Q' {
-                        New-Item -ItemType File -Path "$Root\.quit_flag" -Force | Out-Null
-                        Write-Host "`n  ⏹ 退出信号已发送 — 等待当前步骤完成..." -ForegroundColor Red
-                    }
-                }
-            }
-            Start-Sleep -Milliseconds 200
-        }
-    }
-
-    $runspace = [RunspaceFactory]::CreateRunspace()
-    $runspace.ApartmentState = "STA"
-    $runspace.ThreadOptions = "ReuseThread"
-    $runspace.Open()
-    $ps = [PowerShell]::Create()
-    $ps.Runspace = $runspace
-    [void]$ps.AddScript($monitorScript).AddArgument($ScriptRoot)
-    $ps.BeginInvoke()
-    return @{ Runspace = $runspace; PowerShell = $ps }
 }
 
 # ── Environment Setup ───────────────────────────────────────────
@@ -156,7 +104,7 @@ function Build-PythonArgs {
         }
         "batch-test" {
             $script:PythonScript = "tests/_test_phase_c.py"
-            if ($From) { $args += "--from-section", $From }
+            if ($From) { $args += "--section", $From }
         }
     }
 
@@ -190,6 +138,7 @@ function Invoke-PythonScript {
     $procInfo.UseShellExecute = $false
     $procInfo.RedirectStandardOutput = $true
     $procInfo.RedirectStandardError = $true
+    $procInfo.RedirectStandardInput = $true
     $procInfo.CreateNoWindow = $true
     $procInfo.WorkingDirectory = $ScriptRoot
 
@@ -237,16 +186,32 @@ function Invoke-PythonScript {
         # Wait with progress timeout detection
         $exitTimeout = 1800  # 30 min max
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $paused = $false
+        $quitRequested = $false
         while (-not $proc.HasExited) {
             $proc.WaitForExit(3000) | Out-Null
 
-            # Quit flag check
-            if (Test-Path "$ScriptRoot\.quit_flag") {
-                Write-Host "`n  [QUIT] Graceful shutdown requested..." -ForegroundColor Red
-                if (-not $proc.WaitForExit(30000)) {
-                    $proc.Kill()
-                    Write-Host "  [QUIT] Process forcefully terminated." -ForegroundColor Red
+            # Live keyboard control: P toggles pause/resume, Q requests stop.
+            if (-not $proc.HasExited -and [Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                if ($key.Key -eq 'P') {
+                    if ($paused) {
+                        $proc.StandardInput.WriteLine("RESUME")
+                        $paused = $false
+                        Write-Host "`n  ▶ 继续执行" -ForegroundColor Green
+                    } else {
+                        $proc.StandardInput.WriteLine("PAUSE")
+                        $paused = $true
+                        Write-Host "`n  ⏸ 已暂停 — 按 P 继续" -ForegroundColor Yellow
+                    }
+                } elseif ($key.Key -eq 'Q') {
+                    $proc.StandardInput.WriteLine("STOP")
+                    $quitRequested = $true
+                    Write-Host "`n  ⏹ 停止信号已发送 — 等待当前步骤完成..." -ForegroundColor Red
                 }
+            }
+
+            if ($quitRequested -and $proc.WaitForExit(30000)) {
                 break
             }
 
@@ -257,6 +222,7 @@ function Invoke-PythonScript {
             }
         }
 
+        try { $proc.StandardInput.Close() } catch {}
         $proc.WaitForExit(5000) | Out-Null
         $exitCode = $proc.ExitCode
         Write-Host ""
@@ -271,7 +237,6 @@ function Invoke-PythonScript {
 
 # ── Main ────────────────────────────────────────────────────────
 function Main {
-    Clear-Flags
     Show-Banner
 
     # Direct command-line mode
@@ -294,16 +259,8 @@ function Main {
         $choice = Read-Host "  请选择命令 [1-6/K/Q]"
 
         switch ($choice.ToUpper()) {
-            'K' {
-                $monitor = Start-KeyboardMonitor
-                Write-Host "  按 Enter 返回菜单..."
-                Read-Host
-                Clear-Flags
-                continue
-            }
             'Q' {
                 Write-Host "  再见!" -ForegroundColor Green
-                Clear-Flags
                 return
             }
             { $_ -in @('1','2','3','4','5','6') } {
@@ -357,7 +314,7 @@ function Main {
 
                 # Batch-test: starting section
                 if ($cmd -eq 'batch-test') {
-                    $fromSection = Read-Host "  起始章节 (Enter=全部)]
+                    $fromSection = Read-Host "  起始章节 (Enter=全部)"
                     if ($fromSection) { $script:From = $fromSection }
                     else { $script:From = $null }
                 }
@@ -397,7 +354,6 @@ function Main {
                 $again = Read-Host "  继续执行其他命令? [Y/n]"
                 if ($again -eq 'n' -or $again -eq 'N') {
                     Write-Host "  再见!" -ForegroundColor Green
-                    Clear-Flags
                     return
                 }
                 Write-Host ""

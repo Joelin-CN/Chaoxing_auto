@@ -34,8 +34,10 @@ def test_queue_never_exceeds_slots(monkeypatch):
     monkeypatch.setattr(orch, "run_for_account", fake_run_for_account)
     monkeypatch.setattr(orch, "close_chaoxing_browser", lambda i: True)
     monkeypatch.setattr(orch, "MemoryMonitor", _fake_monitor())
-    monkeypatch.setattr(orch.memory, "measure_project_chrome_gb", lambda *a: 0.0)
-    monkeypatch.setattr(orch.memory, "gate_open", lambda *a: True)
+    # Patch the names actually referenced inside orchestrator, not the
+    # memory-module attributes (which the imported aliases do not follow).
+    monkeypatch.setattr(orch, "measure_project_chrome_gb", lambda *a: 0.0)
+    monkeypatch.setattr(orch, "gate_open", lambda *a: True)
     monkeypatch.setattr(orch, "_THREAD_STAGGER_SECONDS", 0)
 
     threads = orch.run_multi_account(
@@ -59,8 +61,8 @@ def test_queue_waits_when_gate_closed(monkeypatch):
     monkeypatch.setattr(orch, "run_for_account", lambda *a: None)
     monkeypatch.setattr(orch, "close_chaoxing_browser", lambda i: True)
     monkeypatch.setattr(orch, "MemoryMonitor", _fake_monitor())
-    monkeypatch.setattr(orch.memory, "measure_project_chrome_gb", lambda *a: 0.0)
-    monkeypatch.setattr(orch.memory, "gate_open", flaky_gate)
+    monkeypatch.setattr(orch, "measure_project_chrome_gb", lambda *a: 0.0)
+    monkeypatch.setattr(orch, "gate_open", flaky_gate)
     monkeypatch.setattr(orch, "_GATE_RETRY_SECONDS", 0.01)
 
     threads = orch.run_multi_account(

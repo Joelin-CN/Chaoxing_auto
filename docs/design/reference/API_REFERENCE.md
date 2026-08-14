@@ -5,6 +5,9 @@
 > **目的**: 记录 Python ↔ JS ↔ CLI 三层接口，便于后续重构 bat/ps1 逻辑。  
 > **变更**: v2.0 — 修正实际行数、添加 Doubao API 后端、V2 截图策略、Grade-Only 模式。
 
+> ⚠️ **历史参考（2026-06）**：DeepSeek Web 后端已移除，`ai.provider` 仅支持 `doubao-api`；
+> 主入口为 `python -m chaoxing.api`。最新三层契约见 [../api.md](../api.md)。
+
 ---
 
 ## 目录
@@ -263,7 +266,7 @@ _run_account_in_thread() → 设置线程名 "chaoxing-account-N"
 
 main() 中:
   threads = [Thread(target=_run_account_in_thread, args=(idx, cred, args)) ...]
-  每个线程间隔 1s 启动
+  每个线程间隔约 0.5s（0.25–0.75s 随机抖动）启动
   join all with KeyboardInterrupt → SHUTDOWN_FLAG.set()
 ```
 

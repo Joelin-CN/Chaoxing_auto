@@ -17,6 +17,7 @@ from ...logging_setup import log
 from ...browser.engine import pw_snapshot, pw_click
 from ...browser.js_runner import pw_run_code_file, pw_extract_result
 from ...utils import find_ref_by_text
+from ...utils import human_delay
 
 
 def _submit_quiz() -> bool:
@@ -35,7 +36,7 @@ def _submit_quiz() -> bool:
         submit_ref = find_ref_by_text(submit_snap, "暂存")
     if submit_ref:
         pw_click(submit_ref)
-        time.sleep(2)
+        human_delay(2.0, 0.25)
 
         # Confirm dialog if present
         confirm_snap = pw_snapshot()
@@ -44,7 +45,7 @@ def _submit_quiz() -> bool:
             confirm_ref = find_ref_by_text(confirm_snap, "确认")
         if confirm_ref:
             pw_click(confirm_ref)
-            time.sleep(1)
+            human_delay(1.0, 0.3)
         return True
 
     log("  Could not find submit button via any method", "WARN")
@@ -135,17 +136,17 @@ def _submit_quiz_native() -> bool:
         result = _json.loads(result_str)
         if result.get("ok"):
             log(f"  Submit: {result.get('method', '?')}")
-            time.sleep(2)
+            human_delay(2.0, 0.25)
 
             # Check for confirmation dialog (like submitCheckTimes)
-            time.sleep(1)
+            human_delay(1.0, 0.3)
             confirm_snap = pw_snapshot()
             confirm_ref = find_ref_by_text(confirm_snap, "确定")
             if not confirm_ref:
                 confirm_ref = find_ref_by_text(confirm_snap, "确认")
             if confirm_ref:
                 pw_click(confirm_ref)
-                time.sleep(1)
+                human_delay(1.0, 0.3)
             return True
     except _json.JSONDecodeError:
         log(f"  Native submit result parse error: {result_str[:80]}", "WARN")

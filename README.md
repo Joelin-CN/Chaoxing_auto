@@ -22,7 +22,7 @@ Chaoxing_auto/
 ```
 ┌─────────────────────────────────────────────┐
 │            Vue 3 前端 (Renderer)             │
-│   Views / Components ←→ Pinia Stores (8)     │
+│   Views / Components ←→ Pinia Stores (9)     │
 │              ChaoxingApi (interface)         │
 │         ├── ElectronApiClient (生产)         │
 │         └── MockApiClient     (开发)         │
@@ -106,7 +106,7 @@ npm run build        # vite build + electron-builder
 
 - **Vue 3.4** + Composition API + `<script setup>`
 - **Vue Router 4**（hash 模式）
-- **Pinia 2**（8 个 Store）
+- **Pinia 2**（9 个 Store）
 - **TypeScript 5**（strict）+ **vue-tsc 2.x** 类型检查
 - **Vite 5** 构建
 - **Electron 28** 桌面壳
@@ -129,11 +129,11 @@ npm run build        # vite build + electron-builder
 
 ### Layer 1 — `ChaoxingApi` 接口（Store 层）
 
-字符串 ID、UI 形态类型。`ElectronApiClient` 与 `MockApiClient` 都实现此接口。核心方法：`startJob` / `pauseJob` / `resumeJob` / `stopJob` / `pauseSelected` / `resumeSelected` / `stopSelected` / `getJobStatus` / `scanCourses` / `getCourses` / `getAccounts` / `getAccountStatus` / `getSettings` / `setSettings` / `getTickets` / `resolveTicket` / `resolveCaptcha` / `getBalance` / `getMemoryPlan` / `getAiStatus` / `setAiConfig` / `testAi` / `addAccount` / `editAccount` / `removeAccount` / `openFilePicker` / `getAccountsDefaultPath` + 事件订阅 `onProgress` / `onPhaseChange` / `onLog` / `onTicket` / `onCompleted` / `onError` / `onResult` / `onMemory`。
+字符串 ID、UI 形态类型。`ElectronApiClient` 与 `MockApiClient` 都实现此接口。核心方法：`startJob` / `pauseJob` / `resumeJob` / `stopJob` / `pauseSelected` / `resumeSelected` / `stopSelected` / `getJobStatus` / `scanCourses` / `getCourses` / `getAccounts` / `getAccountStatus` / `getSettings` / `setSettings` / `getTickets` / `resolveTicket` / `resolveCaptcha` / `getBalance` / `getSystemResources` / `getMemoryPlan` / `getAiStatus` / `setAiConfig` / `testAi` / `addAccount` / `editAccount` / `removeAccount` / `openFilePicker` / `getAccountsDefaultPath` + 事件订阅 `onProgress` / `onPhaseChange` / `onLog` / `onTicket` / `onCompleted` / `onError` / `onResult` / `onMemory`。
 
 ### Layer 2 — Electron IPC 协议
 
-数字 ID、后端形态类型。25 个 invoke 通道 + 8 个事件通道：
+数字 ID、后端形态类型。30 个 invoke 通道 + 8 个事件通道：
 
 **Renderer → Main (invoke)**
 
@@ -157,6 +157,7 @@ npm run build        # vite build + electron-builder
 | `accounts:add` / `accounts:edit` / `accounts:remove` | 账号载荷 | void（原子写当前账号文件） |
 | `accounts:default-path` | — | 默认账号文件绝对路径 |
 | `memory:plan` | — | 空闲时按当前机器状态计算的并发计划 |
+| `system:resources` | — | 实时系统资源（RAM / CPU / 运行时长） |
 | `dialog:open-file` | — | 文件选择器结果（账号文件） |
 
 **Main → Renderer (event)**：`on-progress` / `on-phase-change` / `on-log` / `on-ticket` / `on-completed` / `on-error` / `on-result` / `on-memory`，载荷为对应的 `Python*Event` 原始对象。
@@ -166,7 +167,7 @@ npm run build        # vite build + electron-builder
 **命令行入口**（`python -m chaoxing.api`，cwd = `backend/`）：
 
 ```
-python -m chaoxing.api --job-id <id> --accounts <csv> --mode <full|scan_only|solve_only> [--courses <csv>] [--max-concurrent <n>] [--budget-gb <gb>] [--system-limit-gb <gb>] [--per-account-estimate-gb <gb>]
+python -m chaoxing.api --job-id <id> --accounts <csv> --mode <full|scan_only|solve_only> [--courses <csv>] [--grade-only] [--content-only] [--max-concurrent <n>] [--budget-gb <gb>] [--system-limit-gb <gb>] [--per-account-estimate-gb <gb>]
 ```
 
 **stdin 控制信号**（逐行）：`PAUSE\n` / `RESUME\n` / `STOP\n`
@@ -177,6 +178,7 @@ python -m chaoxing.api --job-id <id> --accounts <csv> --mode <full|scan_only|sol
 {"type":"PROGRESS","jobId":"...","percent":45,"message":"...","phase":"solve_quiz","phaseIndex":3}
 {"type":"PHASE","jobId":"...","phase":"solve_quiz","phaseIndex":3,"fromPhase":"process_sections"}
 {"type":"LOG","jobId":"...","level":"info","message":"...","timestamp":"2026-06-26T12:00:00.000Z"}
+{"type":"MEMORY","jobId":"...","budgetGB":12.9,"projectChromeGB":1.1,"perAccountAvgGB":0.7,"remainingCount":5,"level":"info","message":"..."}
 {"type":"TICKET","jobId":"...","ticket":{ "id":"...", "type":"captcha", "title":"...", "message":"...", "resolved":false, "createdAt":"..." }}
 {"type":"RESULT","jobId":"...","data":{ /* 自由格式 */ }}
 {"type":"ERROR","jobId":"...","error":"...","stack":"...","recoverable":false}

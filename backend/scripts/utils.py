@@ -7,6 +7,15 @@ All real logic lives in the chaoxing/ package (41 modules, 12 subpackages).
 This file exists so that existing scripts and tests that do
 `from utils import ...` continue to work.
 """
+import sys
+from pathlib import Path
+
+# When invoked through backend/scripts (e.g. tests/_test_phase_c.py), make sure
+# the backend root is importable so `chaoxing.*` resolves correctly.
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
+
 # ══════════════════════════════════════════════════════════════════
 #  Paths & Constants
 # ══════════════════════════════════════════════════════════════════
@@ -17,8 +26,6 @@ from chaoxing.constants import (
     OUTPUT_DIR,
     TMP_DIR,
     SHUTDOWN_FLAG,
-    ACCOUNT_SEMAPHORE,
-    MAX_CONCURRENT_ACCOUNTS,
 )
 
 # ══════════════════════════════════════════════════════════════════

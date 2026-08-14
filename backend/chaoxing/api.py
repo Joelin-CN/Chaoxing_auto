@@ -609,6 +609,26 @@ Stdin control signals (one per line, read by background thread):
     # -- Register protocol handler (routes log()/progress() to JSON) ---
     set_protocol_handler(_make_protocol_handler(protocol))
 
+    # -- Pre-flight: credentials must exist for the requested accounts ----
+    # Without this, run_multi_account() silently returns [] and the job would
+    # be reported as "completed" even though nothing ran.
+    from chaoxing.platform.auth import read_all_chaoxing_credentials
+
+    all_creds = read_all_chaoxing_credentials()
+    if not all_creds:
+        protocol.emit_error("No accounts found in data/passwords/chaoxing.txt")
+        protocol.emit_done()
+        stdin_ctrl.stop()
+        sys.exit(1)
+
+    available_indices = {c["index"] for c in all_creds}
+    missing_indices = set(account_indices) - available_indices
+    if missing_indices:
+        protocol.emit_error(f"Account indices not found: {sorted(missing_indices)}")
+        protocol.emit_done()
+        stdin_ctrl.stop()
+        sys.exit(1)
+
     # -- Emit initial state ---------------------------------------------
     protocol.emit_phase("idle")
     protocol.emit_progress(0,
@@ -633,6 +653,16 @@ Stdin control signals (one per line, read by background thread):
             system_limit_gb=cli.system_limit_gb,
             per_account_estimate_gb=cli.per_account_estimate_gb,
         )
+
+        # A user STOP sets the shutdown flag while threads exit cleanly. Do NOT
+        # report that as "completed" — the StdinController already emitted a
+        # "stopped" phase, so end the job here as an error/stop.
+        if SHUTDOWN_FLAG.is_set():
+            elapsed = time.time() - start_time
+            protocol.emit_phase("stopped")
+            protocol.emit_error(f"Job stopped by user after {elapsed:.0f}s")
+            protocol.emit_done()
+            return
 
         # -- Success ----------------------------------------------------
         elapsed = time.time() - start_time

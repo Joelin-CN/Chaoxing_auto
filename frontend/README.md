@@ -11,7 +11,7 @@
 | 框架 | Vue 3.4 (Composition API, `<script setup>`) |
 | 语言 | TypeScript 5（strict） |
 | 构建 | Vite 5 |
-| 状态管理 | Pinia 2（8 个 Store） |
+| 状态管理 | Pinia 2（9 个 Store） |
 | 路由 | Vue Router 4（hash 模式） |
 | 桌面壳 | Electron 28 |
 | 样式 | Scoped CSS + CSS 自定义属性（玻璃拟态，亮/暗双主题） |
@@ -32,6 +32,9 @@ npm run dev:electron
 # 仅构建 Web 产物 (dist/)
 npm run build:web
 
+# 仅重建 Electron 主进程 / preload (dist-electron/) —— 改过 electron/* 后必须执行
+npx vite build --mode electron
+
 # 构建桌面应用 (dist/ + electron-builder)
 npm run build
 
@@ -44,6 +47,10 @@ npm run typecheck
 
 > Mock 模式：`createApiClient()` 检测不到 `window.electronAPI` 时返回 `MockApiClient`，使用内存模拟数据，任务启动后通过 `setTimeout` tick 循环自动推进阶段、泳道进度与日志，不发起任何网络请求。
 
+> 注意：`npm run build:web` 只构建渲染进程（`dist/`），**不会**重建 `dist-electron/`。
+> 修改 `electron/` 主进程代码（IPC、状态机、账号处理等）后，需额外执行
+> `npx vite build --mode electron`（或直接 `npm run build`），否则界面运行的是旧主进程。
+
 ## NPM 脚本一览
 
 | 脚本 | 作用 |
@@ -51,6 +58,7 @@ npm run typecheck
 | `dev` | Vite 开发服务器（Web / Mock 模式） |
 | `dev:electron` | Vite + Electron（`--mode electron`） |
 | `build:web` | 仅 `vite build`，输出到 `dist/` |
+| `npx vite build --mode electron` | 仅重建 Electron 主进程 / preload 到 `dist-electron/` |
 | `build` | `vite build && electron-builder`，打包桌面应用 |
 | `preview` | 预览 `dist/` 产物 |
 | `typecheck` | `vue-tsc -p tsconfig.json` + `vue-tsc -p tsconfig.node.json`，均 `--noEmit` |
@@ -69,15 +77,16 @@ frontend/
 │   ├── env.d.ts                    # 环境/类型声明
 │   ├── app/
 │   │   ├── App.vue                 # 根布局（侧边栏 + router-view + 日志控制台）
-│   │   └── stores/                 # Pinia 状态管理（8 个）
-│   │       ├── account.store.ts    # 账号列表与选择
-│   │       ├── attention.store.ts  # 工单（去重 + 上限 200）
-│   │       ├── campaign.store.ts   # 任务配置（目标/策略/模式 + 预估）
-│   │       ├── course.store.ts     # 课程（按账号缓存、扫描、选择同步）
-│   │       ├── execution.store.ts  # 任务执行（事件监听、计时器、泳道控制）
-│   │       ├── log.store.ts        # 日志缓冲（上限 500）
-│   │       ├── memory.store.ts     # 内存计划 / MEMORY 事件（预算仪表）
-│   │       └── settings.store.ts   # 系统设置（localStorage + 防抖同步）
+    │   │   └── stores/                 # Pinia 状态管理（9 个）
+    │   │       ├── account.store.ts    # 账号列表与选择
+    │   │       ├── attention.store.ts  # 工单（去重 + 上限 200）
+    │   │       ├── campaign.store.ts   # 任务配置（目标/策略/模式 + 预估）
+    │   │       ├── captcha.store.ts    # 验证码队列（人工介入弹窗）
+    │   │       ├── course.store.ts     # 课程（按账号缓存、扫描、选择同步）
+    │   │       ├── execution.store.ts  # 任务执行（事件监听、计时器、泳道控制）
+    │   │       ├── log.store.ts        # 日志缓冲（上限 500）
+    │   │       ├── memory.store.ts     # 内存计划 / MEMORY 事件（预算仪表）
+    │   │       └── settings.store.ts   # 系统设置（localStorage + 防抖同步）
 │   ├── router/
 │   │   └── index.ts                # 路由配置（5 条 hash 路由 + lazy load）
 │   ├── shared/
@@ -103,8 +112,8 @@ frontend/
     ├── types.ts                    # IPC 类型 + IPC_CHANNELS 常量
     ├── ipc/
     │   ├── job.handler.ts          # 任务 IPC（RAM 检查、限流、PythonBridge 绑定）
-    │   ├── course.handler.ts       # 课程 IPC（当前返回 Mock 数据，TODO 接真后端）
-    │   ├── status.handler.ts       # 账号/状态/设置/工单 IPC（当前 Mock）
+    │   ├── course.handler.ts       # 课程 IPC（读取 Python 发现状态，真实后端）
+    │   ├── status.handler.ts       # 账号/状态/设置/工单 IPC（accounts:status、tickets 仍为桩）
     │   └── balance.handler.ts      # 余额 IPC（spawn chaoxing-backend 跑 chaoxing.balance，§4.7）
     └── python/
         └── pythonBridge.ts         # Python 子进程桥接（spawn、NDJSON 解析、生命周期）
@@ -151,7 +160,7 @@ CSS 自定义属性驱动，支持亮/暗双主题（设置 → 主题切换）�
 完整契约见 **[../docs/design/api.md](../docs/design/api.md)**，分三层：
 
 1. **Layer 1** — `ChaoxingApi` TypeScript 接口（Store 消费层，字符串 ID、UI 形态类型）
-2. **Layer 2** — Electron IPC 协议（Renderer ↔ Main，数字 ID、后端形态类型，25 个 invoke 通道 + 8 个事件通道）
+2. **Layer 2** — Electron IPC 协议（Renderer ↔ Main，数字 ID、后端形态类型，30 个 invoke 通道 + 8 个事件通道）
 3. **Layer 3** — Python 子进程 stdin/stdout NDJSON 协议（控制信号 `PAUSE`/`RESUME`/`STOP`，事件 `PROGRESS`/`PHASE`/`LOG`/`TICKET`/`RESULT`/`ERROR`/`MEMORY`/`DONE`）
 
 `ElectronApiClient`（`ipcClient.ts`）是两套类型系统之间的映射层：账号 ID `string ↔ number`、Course/Settings/Ticket 形态转换、模式与 AI 提供方映射、事件重整。`MockApiClient` 直接实现 Layer 1，不经过 IPC。

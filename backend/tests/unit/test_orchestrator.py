@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from chaoxing.orchestrator import (
+    AccountRunError,
     RunConfig,
     run_multi_account,
     run_for_account,
@@ -136,6 +137,32 @@ class TestRunMultiAccount:
 
         run_multi_account([0], "full")
         assert SHUTDOWN_FLAG.is_set()
+        SHUTDOWN_FLAG.clear()
+
+    def test_run_for_account_login_failure_returns_false(self):
+        """Auto-login failure must surface as a failed lane, not success."""
+        import chaoxing.orchestrator as orch
+        SHUTDOWN_FLAG.clear()
+        with patch.object(orch, "ensure_logged_in", return_value=False), \
+             patch.object(orch, "progress"), \
+             patch.object(orch, "log"):
+            config = RunConfig()
+            assert run_for_account(0, {"account": "user0"}, config) is False
+        SHUTDOWN_FLAG.clear()
+
+    def test_run_multi_account_raises_when_lane_fails(self, monkeypatch):
+        """A hard account failure must raise AccountRunError after all lanes."""
+        import chaoxing.orchestrator as orch
+        SHUTDOWN_FLAG.clear()
+        monkeypatch.setattr(
+            orch, "read_all_chaoxing_credentials",
+            lambda: [{"index": 0, "account": "a0", "password": "p"}],
+        )
+        monkeypatch.setattr(orch, "run_for_account", lambda *a: False)
+        monkeypatch.setattr(orch, "close_chaoxing_browser", lambda i: True)
+        monkeypatch.setattr(orch, "_THREAD_STAGGER_SECONDS", 0)
+        with pytest.raises(AccountRunError):
+            run_multi_account([0], "full", max_concurrent=1)
         SHUTDOWN_FLAG.clear()
 
 

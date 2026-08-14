@@ -1,13 +1,18 @@
 # 前后端交互 API 文档 — 超星助手
 
-> **版本**: v1.3
-> **更新**: 2026-06-26
+> **版本**: v1.4
+> **更新**: 2026-08-13
 > **审计**: 多 Agent 并行全代码库审查 + correctness pass 续轮校正
 > **目的**: 定义前端 (Electron + Vue 3) 与后端 (Python/JS 脚本) 之间的完整接口契约，供前后端独立开发和后续仓库融合使用。
 
+> **v1.4 变更**：同步 2026-08-13 代码现状——Pinia Store 9 个、IPC 30 个 invoke + 8 个事件通道、
+> `courses:*` / `accounts:list` 已接真实后端、`--chromium-flags` 已移除、DeepSeek 完全移除
+> （AI 仅 doubao）、新增 `MEMORY` 事件与 `system:resources` / `ai:*` / 账号管理 / 文件选择等通道；
+> 修正设置映射与已知问题表。
+
 > **v1.3 变更**：新增**余额查询**全链路（§4.7）——`balance:query` IPC 通道 + `balance.handler.ts`（spawn Anaconda 解释器跑 `python -m chaoxing.balance`）+ `getBalance()`（ipcClient / mockClient）+ `DashboardView` 实时余额卡片，替换原硬编码 `¥500`。
 
-> **v1.2 变更**：逐账号运行时控制 (`pauseSelected`/`resumeSelected`/`stopSelected`) 已完整接入 Store / ipcClient / mockClient 与 IPC 层；Electron 模式对真子集显式抛错（见第 7 节）。`quizSolver` 映射改为 `mapQuizSolver`（`doubao`/`local` → `deepseek`）。类型检查迁移到 `vue-tsc 2.x`（兼容 Node 24 + TS 5.9）。多项 v1.1 「已知 Bug」已修复（见第 9.2 节）。
+> **v1.2 变更**：逐账号运行时控制 (`pauseSelected`/`resumeSelected`/`stopSelected`) 已完整接入 Store / ipcClient / mockClient 与 IPC 层；Electron 模式对真子集显式抛错（见第 7 节）。类型检查迁移到 `vue-tsc 2.x`（兼容 Node 24 + TS 5.9）。多项 v1.1 「已知 Bug」已修复（见第 9.2 节）。v1.2 中的 `mapQuizSolver` 描述已被 v1.4 取代。
 
 ---
 
@@ -31,7 +36,7 @@
 ┌─────────────────────────────────────────────────────────┐
 │                   Vue 3 前端 (Renderer)                   │
 │                                                         │
-│  Views / Components  ←→  Pinia Stores (7 stores)        │
+│  Views / Components  ←→  Pinia Stores (9 stores)        │
 │                                │                        │
 │                   ChaoxingApi (interface)                │
 │                   ├── ElectronApiClient (生产)            │
@@ -52,11 +57,10 @@
 ┌───────────────────────────▼─────────────────────────────┐
 │              Python 后端 (子进程)                          │
 │                                                         │
-│  chaoxing_orchestrator.py                                │
-│  ├── utils.py (Playwright 封装)                          │
-│  ├── chapter_quiz_solver.py (AI 答题)                    │
-│  ├── chapter_content_bot.py (视频/文档)                   │
-│  └── AI 后端 (DeepSeek / Doubao API)                     │
+│  python -m chaoxing.api (JSON-line 入口)                 │
+│  ├── orchestrator.py (多账号编排)                        │
+│  ├── solvers/ (quiz + content)                           │
+│  └── AI 后端 (Doubao API)                                │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -269,7 +273,7 @@ interface SectionDef {
 }
 ```
 
-**当前状态**: ⚠️ Electron IPC 层返回硬编码 Mock 数据，标记 TODO 待接入 Python 后端。
+**当前状态**: ✅ 已接真实后端——`courses:scan` 读取 `python -m chaoxing.courses` 落盘的发现状态（实际扫描经 `job:start --mode scan_only` 触发）。
 
 **前端触发位置**: `CourseAtlasView.vue` (scanClicked / "一键扫描") → `course.store.ts` (scanCourses action)
 
@@ -279,7 +283,7 @@ interface SectionDef {
 
 获取指定账号的已缓存课程列表。不传 `accountId` 则返回所有账号的课程。
 
-**当前状态**: ⚠️ Electron IPC 层返回硬编码 Mock 数据。
+**当前状态**: ✅ 已接真实后端——读取 `discovered_courses_chaoxing-chrome-N.json`；未扫描返回空列表。
 
 **前端触发位置**: `CourseAtlasView.vue` (onMounted, fire-and-forget) → `course.store.ts` (fetchCourses action)
 
@@ -301,7 +305,7 @@ interface Account {
 }
 ```
 
-**当前状态**: ⚠️ Electron IPC 层返回硬编码 Mock 数据（1个测试账号）。
+**当前状态**: ✅ 已接真实后端——`python -m chaoxing.accounts` 读取当前生效账号文件。
 
 **前端触发位置**: `App.vue` (onMounted), `DashboardView.vue` (onMounted), `CourseAtlasView.vue` (onMounted)
 
@@ -311,7 +315,7 @@ interface Account {
 
 获取单个账号的实时状态（含登录态、是否在扫描、课程计数等）。
 
-**当前状态**: ⚠️ Electron IPC 层返回硬编码 Mock 数据。
+**当前状态**: ⚠️ 仍为桩数据（仅 account 1，当前 UI 未调用）。
 
 ---
 
@@ -324,15 +328,22 @@ interface Settings {
   theme: 'light' | 'dark'
   language: string              // 'zh-CN'
   maxConcurrency: number        // 1-8 (前端) → Electron 层映射为 maxWorkers
-  quizSolver: AIProvider        // 'deepseek' | 'openai' | 'gemini' | 'qwen'
+  quizSolver: AIProvider        // 仅 'doubao'（DeepSeek/OpenAI/Gemini/Qwen 已移除）
   quizRetryCount: number        // 0-10
-  videoSpeed: number            // 1-3 (仅前端，未同步到后端)
-  sectionDelay: number          // ms (仅前端，未同步到后端)
-  autoResolveCaptcha: boolean
-  logRetention: number          // days (仅前端)
-  notifications: boolean        // (仅前端)
+  logRetention: number          // days，启动时清理 data/logs
+  notifications: boolean        // 桌面通知
   debugMode: boolean
+  headless: boolean             // 无头浏览器
   targetAccuracy: number        // 60-100 (仅前端，未同步到后端)
+  accountsFilePath: string
+  concurrencyTarget: number | null
+  perAccountEstimateGB: number
+  pythonPath: string            // 空 = 使用 PATH 上的 python
+  pageLoadTimeout: number
+  snapshotTimeout: number
+  clickTimeout: number
+  videoWatchTimeout: number
+  quizAnswerTimeout: number
 }
 ```
 
@@ -340,7 +351,9 @@ interface Settings {
 - 前端: `localStorage` key `'chaoxing-assistant-settings'`
 - 后端: Electron `userData/settings.json`
 
-**注意**: 前端 `Settings` 与 Electron 后端 `Settings` 是两个不同的接口，存在字段差异。`videoSpeed`、`sectionDelay`、`quizRetryCount`、`targetAccuracy`、`notifications`、`logRetention` 等字段仅存在于前端，不同步到后端。
+**注意**: 前端 `Settings` 与 Electron 后端 `Settings` 是两个不同的接口，存在字段差异。
+`videoSpeed` / `sectionDelay` / `autoResolveCaptcha` 死开关已于 2026-08-13 移除；
+超时项、重试、日志保留、通知等通过 `CHAOXING_TIMEOUT_*` / `CHAOXING_RETRY_*` 环境变量注入后端。
 
 ---
 
@@ -549,27 +562,39 @@ interface ErrorEvent {
 
 ```typescript
 const IPC_CHANNELS = {
-  // Renderer → Main (invoke) — 18 个通道
-  JOB_START:            'job:start',
-  JOB_PAUSE:            'job:pause',
-  JOB_RESUME:           'job:resume',
-  JOB_STOP:             'job:stop',
-  JOB_PAUSE_SELECTED:   'job:pause-selected',
-  JOB_RESUME_SELECTED:  'job:resume-selected',
-  JOB_STOP_SELECTED:    'job:stop-selected',
-  JOB_STATUS:           'job:status',
-  COURSES_SCAN:         'courses:scan',
-  COURSES_LIST:         'courses:list',
-  ACCOUNTS_LIST:        'accounts:list',
-  ACCOUNTS_STATUS:      'accounts:status',
-  SETTINGS_GET:         'settings:get',
-  SETTINGS_SET:         'settings:set',
-  TICKETS_LIST:         'tickets:list',
-  TICKETS_RESOLVE:      'tickets:resolve',
-  JOB_RESOLVE_TICKET:   'job:resolve-ticket',
-  BALANCE_QUERY:        'balance:query',
+  // Renderer → Main (invoke) — 30 个通道
+  JOB_START:               'job:start',
+  JOB_PAUSE:               'job:pause',
+  JOB_RESUME:              'job:resume',
+  JOB_STOP:                'job:stop',
+  JOB_PAUSE_SELECTED:      'job:pause-selected',
+  JOB_RESUME_SELECTED:     'job:resume-selected',
+  JOB_STOP_SELECTED:       'job:stop-selected',
+  JOB_STATUS:              'job:status',
+  COURSES_SCAN:            'courses:scan',
+  COURSES_LIST:            'courses:list',
+  ACCOUNTS_LIST:           'accounts:list',
+  ACCOUNTS_STATUS:         'accounts:status',
+  SETTINGS_GET:            'settings:get',
+  SETTINGS_SET:            'settings:set',
+  TICKETS_LIST:            'tickets:list',
+  TICKETS_RESOLVE:         'tickets:resolve',
+  JOB_RESOLVE_TICKET:      'job:resolve-ticket',
+  BALANCE_QUERY:           'balance:query',
+  SYSTEM_RESOURCES:        'system:resources',
+  MEMORY_PLAN:             'memory:plan',
+  AI_STATUS:               'ai:status',
+  AI_SET:                  'ai:set',
+  AI_TEST:                 'ai:test',
+  ACCOUNTS_ADD:            'accounts:add',
+  ACCOUNTS_EDIT:           'accounts:edit',
+  ACCOUNTS_REMOVE:         'accounts:remove',
+  ACCOUNTS_DEFAULT_PATH:   'accounts:default-path',
+  DIALOG_OPEN_FILE:        'dialog:open-file',
+  BACKEND_SETTINGS_GET:    'backend-settings:get',
+  BACKEND_SETTINGS_SET:    'backend-settings:set',
 
-  // Main → Renderer (push) — 7 个通道
+  // Main → Renderer (push) — 8 个通道
   ON_PROGRESS:      'on-progress',
   ON_PHASE_CHANGE:  'on-phase-change',
   ON_LOG:           'on-log',
@@ -577,15 +602,24 @@ const IPC_CHANNELS = {
   ON_COMPLETED:     'on-completed',
   ON_ERROR:         'on-error',
   ON_RESULT:        'on-result',
-
-  // Backend settings — 与 settings:* 共享同一存储
-  BACKEND_SETTINGS_GET: 'backend-settings:get',
-  BACKEND_SETTINGS_SET: 'backend-settings:set',
+  ON_MEMORY:        'on-memory',
 } as const
 ```
 
-> `backend-settings:*` 与 `settings:*` 操作同一份磁盘存储，是功能别名。计入 invoke 通道总数则为 20 个。
-> `job:resolve-ticket`（验证码回传，见 §4.2）与 `balance:query`（余额查询，见 §4.7）均为独立通道。
+> `backend-settings:*` 与 `settings:*` 操作同一份磁盘存储，是功能别名。计入 invoke 通道总数则为 **30 个**。
+> `job:resolve-ticket`（验证码回传，见 §4.2）、`balance:query`（余额查询，见 §4.7）、
+> `system:resources` / `memory:plan` / `ai:*` / 账号管理 / `dialog:open-file` 均为独立通道。
+
+**2026-08 新增通道速查**
+
+| 通道 | 说明 |
+|------|------|
+| `system:resources` | 实时 RAM/CPU/运行时长（Node `os` 采样，无 Python） |
+| `memory:plan` | 空闲时按当前机器状态计算的并发计划 |
+| `ai:status` / `ai:set` / `ai:test` | AI 配置读取 / 原子写 `doubao.txt` / 方舟连通性测试 |
+| `accounts:add` / `accounts:edit` / `accounts:remove` / `accounts:default-path` | 账号文件原子增删改 + 默认路径 |
+| `dialog:open-file` | 文件选择器（自定义账号文件） |
+| `on-memory` | 后端 `MEMORY` 事件推送（预算仪表） |
 
 ### 3.2 Invoke 通道详情
 
@@ -681,7 +715,7 @@ type JobPhase =
 - **方向**: Renderer → Main
 - **请求**: `ScanCoursesPayload { accountIds: number[], courseIds?: string[] }`
 - **返回**: `Course[]`（Electron 内部类型）
-- **当前状态**: ⚠️ 返回硬编码 Mock 数据（3 门课程），标记 TODO 待接入 Python 后端
+- **当前状态**: ✅ 已接真实后端——`python -m chaoxing.courses --account N` 读取发现状态；未扫描返回空列表（`scanned=false`）
 
 ```typescript
 interface Course {
@@ -710,14 +744,14 @@ interface CourseSection {
 - **方向**: Renderer → Main
 - **请求**: `accountId: number`
 - **返回**: `Course[]`
-- **当前状态**: ⚠️ 返回硬编码 Mock 数据
+- **当前状态**: ✅ 已接真实后端（同上）
 
 #### `accounts:list`
 
 - **方向**: Renderer → Main
 - **请求**: 无
 - **返回**: `Account[]`（Electron 内部类型）
-- **当前状态**: ⚠️ 返回硬编码 Mock 数据（1 个测试账号）
+- **当前状态**: ✅ 已接真实后端——`python -m chaoxing.accounts` 读取当前账号文件
 
 ```typescript
 interface Account {
@@ -737,7 +771,7 @@ interface Account {
 - **方向**: Renderer → Main
 - **请求**: `accountId: number`
 - **返回**: `AccountStatus`
-- **当前状态**: ⚠️ 返回硬编码 Mock 数据
+- **当前状态**: ⚠️ 仍为桩数据（仅 account 1，当前 UI 未调用）
 
 ```typescript
 interface AccountStatus {
@@ -757,19 +791,28 @@ interface AccountStatus {
 - **请求**: `settings:get` 无参数；`settings:set` 接受 `Partial<Settings>`
 - **返回**: `Settings` 对象（Electron 后端类型）
 - **持久化**: Electron `userData/settings.json`
-- **类型**: Electron 层 `Settings` 包含 `pythonPath`, `maxWorkers`, `headless`, `browserTimeout`, `quizSolver`, `deepseekModel`, `doubaoModel`, `autoResolve`, `logLevel` 等后端配置字段
+- **类型**: Electron 层 `Settings` 包含 `pythonPath`, `maxWorkers`, `headless`, `browserTimeout`, `quizSolver`（仅 `doubao`）, `logLevel`, 账号文件路径、内存并发、超时/重试等字段
 
 ```typescript
 interface Settings {
-  pythonPath: string           // Python 解释器路径，默认 'python'
+  pythonPath: string           // Python 解释器路径，默认 '' = PATH 上的 python
   maxWorkers: number           // 最大并发 worker 数，默认 2
   headless: boolean            // 无头浏览器模式
   browserTimeout: number       // 浏览器超时 (ms)，默认 30000
-  quizSolver: 'deepseek' | 'doubao' | 'local'
-  deepseekModel: string        // 默认 'deepseek-v4-pro'
-  doubaoModel: string
-  autoResolve: boolean         // 自动解决验证码
+  quizSolver: 'doubao'         // DeepSeek/本地已移除
   logLevel: 'debug' | 'info' | 'warn' | 'error'
+  accountsFilePath: string
+  concurrencyTarget: number | null
+  perAccountEstimateGB: number
+  notifications: boolean
+  logRetention: number
+  pageLoadTimeout: number
+  snapshotTimeout: number
+  clickTimeout: number
+  videoWatchTimeout: number
+  quizAnswerTimeout: number
+  quizRetryCount: number
+  targetAccuracy: number
 }
 ```
 
@@ -1303,19 +1346,17 @@ region="cn-north-1"          # 可选，默认 cn-north-1
 | 前端 `Settings` | Electron `Settings` | 映射逻辑 |
 |----------------|-------------------|---------|
 | `maxConcurrency` | `maxWorkers` | 直接映射 |
-| `quizSolver` | `quizSolver` | `mapQuizSolver`：后端 `deepseek/qwen/openai/gemini` 直通，**其余（含 `doubao`/`local`）→ `deepseek`** |
-| `autoResolveCaptcha` | `autoResolve` | 直接映射 |
+| `quizSolver` | `quizSolver` | `mapQuizSolver`：后端任意值统一归一化为 `'doubao'`（DeepSeek 已移除） |
 | `debugMode` | `logLevel` | `true → 'debug'`, `false → 'info'` |
-| `videoSpeed` | 无 | **仅前端，未同步** |
-| `sectionDelay` | 无 | **仅前端，未同步** |
-| `quizRetryCount` | 无 | **仅前端，未同步** |
-| `targetAccuracy` | 无 | **仅前端，未同步** |
-| `theme` | 无 | **仅前端** (CSS 自定义属性) |
-| `language` | 无 | **仅前端** (硬编码 `'zh-CN'`) |
-| `logRetention` | 无 | **仅前端** |
-| `notifications` | 无 | **仅前端** |
+| `quizRetryCount` / `targetAccuracy` | `quizRetryCount` / `targetAccuracy` | 经 `CHAOXING_RETRY_*` 环境变量注入后端 |
+| 五项超时（page/snapshot/click/video/quiz） | 同名 | 经 `CHAOXING_TIMEOUT_*` 环境变量注入后端 |
+| `logRetention` | `logRetention` | 主进程启动时清理 `data/logs` |
+| `notifications` | `notifications` | 主进程任务完成/异常桌面通知 |
+| `accountsFilePath` / `concurrencyTarget` / `perAccountEstimateGB` / `pythonPath` | 同名 | 直接映射（`pythonPath` 空 = PATH 上的 python） |
+| `theme` / `language` | 无 | 仅前端（CSS 自定义属性 / 硬编码 `'zh-CN'`） |
 
-> **quizSolver 注意**：后端枚举实际只产出 `deepseek`/`doubao`/`local`，故 `mapQuizSolver` 中的 `qwen/openai/gemini` 分支对真实后端数据是 dead branch。后端 `doubao`、`local` 在渲染侧统一显示为 `deepseek`。`setSettings` 回写时也只发送 `{ maxWorkers, autoResolve, logLevel }`，其余前端字段不持久化到后端。
+> **注意**：`videoSpeed` / `sectionDelay` / `autoResolveCaptcha` 等死开关已从类型与设置页移除；
+> `setSettings` 回写时按上表发送可同步字段，其余前端字段（主题/语言）不持久化到后端。
 
 ### 5.4 工单映射
 
@@ -1342,7 +1383,7 @@ region="cn-north-1"          # 可选，默认 cn-north-1
 
 ### Mock 特性
 
-- **完整模拟**: 所有 invoke 方法 + 7 个事件订阅均有 mock 实现
+- **完整模拟**: 所有 invoke 方法 + 8 个事件订阅均有 mock 实现
 - **逐账号控制**: Mock 模式真实支持选中 lane 的 暂停/恢复/停止（Electron 真子集会抛错），便于在无后端时验证多账号交互
 - **数据生成** (`mockData.ts`):
   - 8 个中国大学账号（含 1 个异常状态）
@@ -1473,10 +1514,9 @@ try {
 
 | 模块 | 文件 | 状态 |
 |------|------|------|
-| 课程扫描 | `electron/ipc/course.handler.ts` | 硬编码 Mock 数据（3门课），待接入 Python 后端 |
-| 课程列表 | `electron/ipc/course.handler.ts` | 同上 |
-| 账号列表 | `electron/ipc/status.handler.ts` | 硬编码 Mock 数据（1个测试账号） |
-| 账号状态 | `electron/ipc/status.handler.ts` | 硬编码 Mock 状态 |
+| 课程扫描/列表 | `electron/ipc/course.handler.ts` | ✅ 已接入 `python -m chaoxing.courses`（读取发现状态） |
+| 账号列表 | `electron/ipc/accounts.handler.ts` | ✅ 已接入 `python -m chaoxing.accounts` |
+| 账号状态 | `electron/ipc/status.handler.ts` | ⚠️ 仍为桩数据（仅 account 1，UI 未调用） |
 | 工单存储 | `electron/ipc/status.handler.ts` | 内存数组，无持久化 |
 
 ### 9.2 已实现 / 已修复
@@ -1502,12 +1542,9 @@ try {
 | 严重度 | 问题 | 位置 |
 |--------|------|------|
 | 中 | 前端设置无法从后端同步（单向流: 前端→后端），多实例时可能不一致 | `settings.store.ts` |
-| 中 | 多个 `Settings` 字段（videoSpeed, sectionDelay, quizRetryCount, targetAccuracy 等）不向后端同步 | `ipcClient.ts` (setSettings 映射) |
 | 中 | `DONE` 事件不含完成统计，Electron 路径 `CompletionEvent.results` 全为 0、`success` 恒为 true | `ipcClient.ts` (onCompleted) |
 | 中 | `campaign.store.ts` 的 `forecast` 计算忽略 `strategy` 和 `mode`（仅用 objective + 课程/账号数） | `campaign.store.ts` |
-| 中 | `courses:list` 拒绝 accountId `0`，而 `getCourses(undefined)` 会传 `0` —— Electron 模式下无账号调用会抛错 | `course.handler.ts` / `ipcClient.ts` |
-| 低 | 工单列表无去重（`addTicket` 可能添加已存在的 ticket） | `attention.store.ts` |
-| 低 | `course.store`、`attention.store` 缺少 `reset()` 方法（execution.store 已有） | 各 store 文件 |
+| 低 | `accounts:status` 仍为桩数据（仅 account 1） | `status.handler.ts` |
 
 ### 9.4 工具链说明
 
@@ -1532,6 +1569,8 @@ try {
 | `frontend/src/app/stores/account.store.ts` | 账号 Store（列表、选择） |
 | `frontend/src/app/stores/course.store.ts` | 课程 Store（按账号缓存、扫描） |
 | `frontend/src/app/stores/campaign.store.ts` | 任务配置 Store（目标/策略/模式 + 预估） |
+| `frontend/src/app/stores/captcha.store.ts` | 验证码队列 Store（人工介入弹窗） |
+| `frontend/src/app/stores/memory.store.ts` | 内存计划 / MEMORY 事件 Store（预算仪表） |
 | `frontend/src/app/stores/settings.store.ts` | 设置 Store（localStorage + 防抖同步） |
 | `frontend/src/app/stores/attention.store.ts` | 工单 Store（列表、筛选、解决） |
 | `frontend/src/app/stores/log.store.ts` | 日志 Store（缓冲 500 条、级别计数） |
@@ -1546,18 +1585,22 @@ try {
 | `frontend/electron/preload.ts` | Context bridge (`window.electronAPI`) |
 | `frontend/electron/main.ts` | Electron 主进程（窗口创建、IPC 注册、生命周期） |
 | `frontend/electron/ipc/job.handler.ts` | 任务 IPC 处理器（含 RAM 检查、速率限制） |
-| `frontend/electron/ipc/course.handler.ts` | 课程 IPC 处理器（当前返回 Mock 数据） |
+| `frontend/electron/ipc/course.handler.ts` | 课程 IPC 处理器（读取 Python 发现状态，真实后端） |
 | `frontend/electron/ipc/status.handler.ts` | 状态/设置/工单 IPC 处理器 |
 | `frontend/electron/ipc/balance.handler.ts` | 余额查询 IPC 处理器（spawn Anaconda 跑 `chaoxing.balance`，§4.7） |
+| `frontend/electron/ipc/accounts.handler.ts` | 账号增删改 IPC（`chaoxing.accounts` 子命令） |
+| `frontend/electron/ipc/ai.handler.ts` | AI 配置读写与方舟连通性测试 |
+| `frontend/electron/ipc/system.handler.ts` | `system:resources` / `memory:plan` |
+| `frontend/electron/ipc/dialog.handler.ts` | 文件选择器 |
 | `frontend/electron/python/pythonBridge.ts` | Python 子进程桥接器（spawn、事件分发、生命周期） |
 
 ## 附录 B: 后端接入检查清单
 
 后端（Python 脚本）开发者接入时应确保：
 
-- [ ] 入口脚本接收 `--job-id`, `--accounts`, `--mode`, `--courses`, `--max-concurrent`, `--budget-gb`, `--system-limit-gb`, `--per-account-estimate-gb` 命令行参数
+- [ ] 入口脚本接收 `--job-id`, `--accounts`, `--mode`, `--courses`, `--grade-only`, `--content-only`, `--max-concurrent`, `--budget-gb`, `--system-limit-gb`, `--per-account-estimate-gb` 命令行参数
 - [ ] stdout 所有输出为 JSON-line 格式（每行一个 JSON 对象）
-- [x] 每个 JSON 对象包含 `type` 字段（`PROGRESS` / `PHASE` / `LOG` / `TICKET` / `RESULT` / `ERROR` / `DONE`）
+- [x] 每个 JSON 对象包含 `type` 字段（`PROGRESS` / `PHASE` / `LOG` / `TICKET` / `RESULT` / `ERROR` / `MEMORY` / `DONE`）
 - [ ] `PROGRESS` 事件包含 `jobId`, `percent` (0-100), `message`
 - [ ] `PHASE` 事件在阶段切换时发送，`phase` 字段为有效枚举值 (`idle` → `login` → `scan_courses` → `process_sections` → `solve_quiz` → `completed`)
 - [x] `TICKET` 事件在验证码 AI 识别失败时发送（内嵌 `imageBase64`），并在 solved/skipped/timeout 时回发 `resolved:true` 作废工单

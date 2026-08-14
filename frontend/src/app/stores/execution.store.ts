@@ -168,7 +168,12 @@ export const useExecutionStore = defineStore('execution', () => {
     eventCleanupFns.push(
       api.onProgress((event) => {
         if (event.jobId !== jobId.value) return
-        progress.value = event.percent
+        // A per-course "Completed" event can carry 100% while the account still
+        // has phases left (quiz done, content pending). Cap non-terminal events
+        // at 99% until the account-level "DONE" arrives, so the banner does not
+        // claim 100% prematurely. The final 100% comes from onCompleted.
+        progress.value =
+          event.percent >= 100 && !/^DONE/.test(event.message) ? 99 : event.percent
         if (typeof event.phaseIndex === 'number') phaseIndex.value = event.phaseIndex
         // The progress event carries no lane data, so the lane cards would never
         // move during a run. Pull the latest handle (which includes per-lane

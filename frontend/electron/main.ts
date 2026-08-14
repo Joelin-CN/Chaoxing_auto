@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
-import { execSync } from 'child_process'
+import { execFile } from 'child_process'
 import { registerJobHandlers, stopActiveJob } from './ipc/job.handler'
 import { registerStatusHandlers } from './ipc/status.handler'
 import { registerCourseHandlers } from './ipc/course.handler'
@@ -80,6 +80,25 @@ function pruneOldLogs(days: number): void {
       // A locked log file must never break startup.
     }
   }
+}
+
+/**
+ * Best-effort cleanup of orphaned Chromium processes that belong to this app.
+ * Only targets chrome.exe/chromium.exe whose command line contains the app's
+ * data root (the persistent profile path), so unrelated browsers are never
+ * force-killed. The playwright-cli session close in stopActiveJob() is the
+ * primary cleanup; this is a safety net for crashed sessions.
+ */
+function cleanupOrphanedChromium(): void {
+  if (process.platform !== 'win32') return
+  const profileRoot = DATA_DIR.replace(/'/g, "''")
+  const script =
+    `Get-CimInstance Win32_Process -Filter "Name='chrome.exe' or Name='chromium.exe'" | ` +
+    `Where-Object { $_.CommandLine -like '*${profileRoot}*' } | ` +
+    `ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`
+  execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout: 8000 }, () => {
+    // Never block app shutdown on cleanup failures.
+  })
 }
 
 function createWindow(): BrowserWindow {
@@ -176,18 +195,9 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true
   stopActiveJob()
-  // Clean up orphaned Playwright Chromium processes.
-  // If the Python subprocess crashes or is forcefully killed,
-  // its child Chromium browsers may survive as zombies and
-  // accumulate across multiple runs, consuming system RAM.
-  // taskkill is Windows-only; guard so this is a no-op elsewhere.
-  if (process.platform === 'win32') {
-    try {
-      execSync('taskkill /f /im chromium.exe /t 2>nul', { timeout: 5000 })
-    } catch {
-      // No chromium.exe running — that's fine
-    }
-  }
+  // Clean up orphaned Playwright Chromium processes scoped to this app's data
+  // root (stopActiveJob already closes the sessions gracefully).
+  cleanupOrphanedChromium()
 })
 
 app.on('quit', () => {

@@ -29,6 +29,7 @@ const ACCOUNTS_TIMEOUT_MS = 15_000
 interface BackendAccount {
   index: number
   account: string
+  website?: string
 }
 
 interface AccountsErrorPayload {
@@ -56,6 +57,7 @@ function toAccount(b: BackendAccount): Account {
   return {
     id: b.index,
     username: b.account,
+    website: b.website ?? '',
     enabled: true,
     createdAt: now,
     updatedAt: now,

@@ -86,6 +86,7 @@ def measure_project_chrome_gb(profile_root: str = None) -> float:
         "$p = Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\";"
         f"$m = $p | Where-Object {{ $_.CommandLine -like '*{escaped}*' }};"
         "$s = ($m | Measure-Object -Property WorkingSetSize -Sum).Sum;"
+        "if ($null -eq $s) { $s = 0 };"
         "[Console]::Out.Write([string]($s))"
     )
     return float(_run_ps(script)) / (1024 ** 3)

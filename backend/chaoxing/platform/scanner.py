@@ -21,6 +21,7 @@ from ..session import _get_active_session
 from ..logging_setup import log
 from ..browser.engine import pw_goto, pw_snapshot
 from ..browser.js_runner import pw_run_code_file, pw_extract_result
+from ..utils import human_delay
 from .navigation import pw_goto_course
 
 
@@ -36,7 +37,7 @@ def _ensure_on_course_listing() -> bool:
     snap = pw_snapshot()
     if "个人空间" not in snap and "i.chaoxing.com/base" not in snap:
         pw_goto("https://i.chaoxing.com/base")
-        time.sleep(3)
+        human_delay(3.0, 0.25)
         snap = pw_snapshot()
 
     if "个人空间" not in snap:
@@ -136,7 +137,7 @@ def _ensure_on_course_listing() -> bool:
         except:
             pass
 
-    time.sleep(2)
+    human_delay(2.0, 0.25)
     snap = pw_snapshot()
     log(f"  Page has 我学的课: {'我学的课' in snap}")
     return True
@@ -162,7 +163,7 @@ def scan_courses() -> list[dict]:
         log("Failed to reach course listing page", "ERROR")
         return []
 
-    time.sleep(2)
+    human_delay(2.0, 0.25)
 
     # 2. JS extraction: find course links, walk up to cards, parse text
     scan_js = r"""
@@ -173,10 +174,22 @@ def scan_courses() -> list[dict]:
         );
         if (!iframe) return JSON.stringify({ok: false, reason: 'no-courses-iframe'});
 
-        await iframe.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await page.waitForTimeout(600);
-        await iframe.evaluate(() => window.scrollTo(0, 0));
-        await page.waitForTimeout(300);
+        // The course list lazy-loads cards while scrolling. Scroll + wait
+        // until the rendered card count stabilizes so a fast first paint does
+        // not leave most courses undiscovered (observed: 11 courses → 1).
+        let stableCardCount = 0;
+        for (let pass = 0; pass < 5; pass++) {
+            await iframe.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+            await page.waitForTimeout(700 + Math.floor(Math.random() * 500));
+            await iframe.evaluate(() => window.scrollTo(0, 0));
+            await page.waitForTimeout(400 + Math.floor(Math.random() * 300));
+            const rendered = await iframe.locator('div.course.learnCourse[id^="c_"]').count();
+            if (rendered > stableCardCount) {
+                stableCardCount = rendered;
+            } else if (rendered === stableCardCount && rendered > 0) {
+                break;
+            }
+        }
 
         const cardDivs = await iframe.locator(
             'div.course.learnCourse[id^="c_"]'
@@ -330,7 +343,7 @@ def scan_course_sections(courseid: str, clazzid: str,
     # 1. Navigate to course page
     log(f"  Navigating to course (id={courseid})...")
     pw_goto_course(courseid, clazzid, cpi)
-    time.sleep(3)
+    human_delay(3.0, 0.25)
 
     # 2. Click 章节 tab via JS
     js_click_chapter = r"""
@@ -340,13 +353,13 @@ def scan_course_sections(courseid: str, clazzid: str,
             const text = (await link.textContent() || '').trim();
             if (text === '章节') {
                 await link.click();
-                await page.waitForTimeout(3000);
+                await page.waitForTimeout(2500 + Math.floor(Math.random() * 1200));
                 return 'clicked';
             }
         }
         try {
             await page.getByRole('link', { name: '章节' }).click();
-            await page.waitForTimeout(3000);
+            await page.waitForTimeout(2500 + Math.floor(Math.random() * 1200));
             return 'clicked-via-role';
         } catch(e) {
             return 'not-found';
@@ -380,7 +393,7 @@ def scan_course_sections(courseid: str, clazzid: str,
         );
         if (!iframe) return JSON.stringify({ok: false, reason: 'no-chapter-iframe'});
 
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(400 + Math.floor(Math.random() * 300));
 
         const bodyText = (await iframe.locator('body').innerText()) || '';
         const progM = bodyText.match(

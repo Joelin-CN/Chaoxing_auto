@@ -13,6 +13,7 @@ export interface Account {
   id: string
   username: string
   displayName: string
+  website?: string
   status: AccountStatus
   avatar?: string
   lastChecked?: number
@@ -227,16 +228,6 @@ export interface Settings {
   clickTimeout: number
   videoWatchTimeout: number
   quizAnswerTimeout: number
-}
-
-export interface BackendSettings {
-  pythonPath: string
-  maxWorkers: number
-  headless: boolean
-  browserTimeout: number
-  quizSolver: 'deepseek' | 'doubao' | 'local'
-  autoResolve: boolean
-  logLevel: 'debug' | 'info' | 'warn' | 'error'
 }
 
 export interface LogLine {

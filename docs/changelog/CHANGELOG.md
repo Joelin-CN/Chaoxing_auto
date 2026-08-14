@@ -2,6 +2,54 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-08-14 — 稳定性与拟人化改造（外部脚本调研 + 站点实测）
+
+### 修复
+- 账号级失败不再误报成功：`run_multi_account` 收集线程结果，登录失败/线程崩溃抛
+  `AccountRunError`；`api.py` 对用户停止发 `stopped + ERROR + DONE`。
+- 内存采样：无 Chrome 进程时输出 0，不再报 `Memory sampler degraded`。
+- 账号增删改后列表即时刷新（`refreshAccounts` 绕过 `loaded` 缓存）；设置页账号文件
+  标签回读后端；账号列表带真实登录网址。
+- 课程扫描：卡片懒加载“滚动-等待-数量稳定”后再抽取（修复 11 门被抽成 1 门）。
+- 多账号并发探测 playwright 会话串行化 + 超时兜底（修复 `playwright-cli list` 挂死）。
+- 停止后重启不再复用死会话；运行中进度在账号级 `DONE` 前封顶 99%。
+- 视频播放器：20s 无进度自恢复看门狗、播放失败有界重试、轮询抖动。
+- 关键路径固定等待改为随机抖动（登录、扫描、导航、内容处理、答题提交）。
+- 真实提交模式章节测验间 60–120s 随机间隔，降低触发提交验证概率。
+
+### 验证
+- 后端单元测试 587 通过；前端类型检查通过。
+- 真实界面 E2E（真实账号、模拟运行不提交）28/28 通过。
+- 识图（vision）复核：修复识图服务超时后，16 张关键截图逐张核对与断言一致，
+  含修复前「执行完成 100% vs FAILED」矛盾截图与修复后「执行失败」对照。
+
+## 2026-08-13（续二）— 账号解析 / CLI / 状态机修复
+
+### 修复
+- 多账号凭证解析崩溃：`read_all_chaoxing_credentials()` 对无 `[N]` 下标的后续账号块
+  执行 `max(str) + 1` 抛 `TypeError`；改用独立整数索引集合分配序号。
+- `website[N]` 写入后无法读回：`_parse_credential_block()` 只识别无下标的 `website`；
+  现在兼容 `website[N]` / `网站[N]`，账号增删改不再丢自定义登录网址。
+- CLI shim 完全失效：`scripts/chaoxing_orchestrator.py` / `utils.py` / `chapter_*`
+  import 已删除符号；重建向后兼容入口，ps1 的 P/Q 改走 stdin 信号
+  （`PAUSE`/`RESUME`/`STOP`），batch-test 参数名修正为 `--section`；并修复
+  `Read-Host` 起始章节提示缺少闭合引号导致的 ps1 语法错误。
+- Electron 失败任务被 `DONE` 翻转为 `completed`；旧任务 `exit`/`error` 事件误清新任务
+  状态；全局清理增加“当前 bridge”守卫。
+- 无凭证/无匹配账号时后端误报成功：`api.py` 启动前预检凭证与账号索引，失败发
+  `ERROR + DONE`。
+- 默认 Python 路径去除 `E:\Softwares\...` 硬编码（空 = PATH 上的 python）；退出清理
+  改为按 `data/` 根过滤的定向进程清理；删除会污染账号数据的 `refreshAccountStatus`
+  死代码。
+- 前端类型清理：Electron `Settings` 移除 `deepseekModel` / `doubaoModel` /
+  `autoResolve` 残留，`quizSolver` 统一为 `doubao`。
+
+### 文档
+- 同步根 README / frontend README / backend README / api.md / integration.md /
+  API_SPEC.md（Store 9 个、IPC 30+8、真实数据接入现状、`--chromium-flags` 移除、
+  `MEMORY` 事件、测试数 584）；architecture.md / API_REFERENCE.md /
+  auto-solution-design.md 加历史参考横幅。
+
 ## 2026-08-13（续）— 设置项落地与文档校正
 
 ### 新增

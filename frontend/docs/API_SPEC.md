@@ -2,7 +2,7 @@
 
 > **权威来源**：完整契约、类型映射、安全与错误处理见 **[../../docs/design/api.md](../../docs/design/api.md)**。本文件是前端本地的精简速查，与代码 (`electron/types.ts`、`electron/python/pythonBridge.ts`) 对齐。
 
-接口分两类：**请求-响应（invoke）通道**（16 个 + 2 个 backend-settings 别名）和 **实时推送事件**（7 种）。
+接口分两类：**请求-响应（invoke）通道**（30 个，含 2 个 backend-settings 别名）和 **实时推送事件**（8 种）。
 
 > 所有 invoke 通道使用 **Electron 内部类型**：账号 ID 为 `number`。渲染侧 `ChaoxingApi`（`string` ID、UI 形态类型）由 `ipcClient.ts` 做映射。
 
@@ -124,7 +124,7 @@ interface CourseSection {
 }
 ```
 
-> ⚠️ `courses:*` 当前返回 Mock 数据（TODO 接入真实后端）。
+> ✅ `courses:*` 已接真实后端：`python -m chaoxing.courses --account N` 读取扫描后落盘的发现状态；未扫描过返回空列表（`scanned=false`）。
 
 ---
 
@@ -169,7 +169,7 @@ interface AccountStatus {
 }
 ```
 
-> ⚠️ `accounts:*` 当前返回 Mock 数据。
+> ✅ `accounts:list` 已接真实后端（`python -m chaoxing.accounts`）；⚠️ `accounts:status` 仍为桩数据（仅 account 1，UI 未调用）。
 
 ---
 
@@ -188,11 +188,20 @@ interface Settings {
   maxWorkers: number
   headless: boolean
   browserTimeout: number
-  quizSolver: 'deepseek' | 'doubao' | 'local'
-  deepseekModel: string
-  doubaoModel: string
-  autoResolve: boolean
+  quizSolver: 'doubao'
   logLevel: 'debug' | 'info' | 'warn' | 'error'
+  accountsFilePath: string
+  concurrencyTarget: number | null
+  perAccountEstimateGB: number
+  notifications: boolean
+  logRetention: number
+  pageLoadTimeout: number
+  snapshotTimeout: number
+  clickTimeout: number
+  videoWatchTimeout: number
+  quizAnswerTimeout: number
+  quizRetryCount: number
+  targetAccuracy: number
 }
 ```
 
@@ -239,6 +248,19 @@ interface Ticket {
 响应: void
 ```
 
+### 6. 余额 / AI / 账号管理 / 系统资源（2026-08 新增通道）
+
+| 通道 | 请求 | 响应 |
+|------|------|------|
+| `balance:query` | 无 | `Balance`（火山引擎现金余额） |
+| `ai:status` / `ai:set` / `ai:test` | `{ apiKey?, model }` | AI 配置状态 / 保存 / 连通性测试 |
+| `accounts:add` / `accounts:edit` / `accounts:remove` | 账号载荷 | void（原子写当前账号文件） |
+| `accounts:default-path` | 无 | 默认账号文件绝对路径 |
+| `dialog:open-file` | 无 | 文件选择器结果（账号文件） |
+| `system:resources` | 无 | RAM / CPU / 运行时长（Node `os` 采样） |
+| `memory:plan` | 无 | 按当前机器状态计算的并发计划 |
+| `backend-settings:get` / `backend-settings:set` | 无 / `Partial<Settings>` | 与 `settings:*` 共用同一份 `userData/settings.json` |
+
 ---
 
 ## 二、实时推送事件（Main → Renderer）
@@ -250,6 +272,7 @@ interface Ticket {
 | `PROGRESS` | `on-progress` | 任务进度更新（高频） |
 | `PHASE` | `on-phase-change` | 阶段切换（中频） |
 | `LOG` | `on-log` | 日志输出（高频） |
+| `MEMORY` | `on-memory` | 内存预算快照（运行中 5 秒一次） |
 | `TICKET` | `on-ticket` | 需要人工介入（低频） |
 | `RESULT` | `on-result` | 自定义结果数据（低频） |
 | `ERROR` | `on-error` | 异常发生（按需） |
@@ -315,14 +338,22 @@ interface Ticket {
 
 > ⚠️ `DONE` 仅携带 `jobId`，**不含完成统计**。渲染侧 `CompletionEvent.results` 在 Electron 路径全为 0。若需真实统计，请通过 `RESULT` 事件单独推送。
 
+### `MEMORY` — `on-memory`
+
+```json
+{ "type": "MEMORY", "jobId": "...", "budgetGB": 12.9, "projectChromeGB": 1.1, "perAccountAvgGB": 0.7, "remainingCount": 5, "level": "info", "message": "..." }
+```
+
+由后端 `MemoryMonitor` 每 5 秒采样后推送，驱动设置页/仪表盘的预算仪表。
+
 ---
 
 ## 三、通信架构
 
 ```
 ┌─────────────────────────────────────┐
-│         Python 脚本（后端）          │
-│   scripts/chaoxing_orchestrator.py   │
+│         Python 后端（子进程）         │
+│     python -m chaoxing.api           │
 └────────┬───────────────┬─────────────┘
          │ stdout NDJSON  │ stdin 信号 (PAUSE/RESUME/STOP)
          ▼                ▲
@@ -339,7 +370,7 @@ interface Ticket {
 └─────────────────────────────────────┘
 ```
 
-**命令行入口**：`python <script> --chromium-flags "<flags>" --job-id <id> --accounts <csv> --mode <full|scan_only|solve_only> [--courses <csv>]`
+**命令行入口**：`python -m chaoxing.api --job-id <id> --accounts <csv> --mode <full|scan_only|solve_only> [--courses <csv>] [--grade-only] [--content-only] [--max-concurrent <n>] [--budget-gb <gb>] [--system-limit-gb <gb>] [--per-account-estimate-gb <gb>]`
 
 ---
 

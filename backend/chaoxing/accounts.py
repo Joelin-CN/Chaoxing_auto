@@ -160,7 +160,8 @@ def main() -> None:
             creds = auth.read_all_chaoxing_credentials()
             _write_json_line({"type": "ACCOUNTS",
                               "accounts": [{"index": c.get("index", i),
-                                            "account": c.get("account", "")}
+                                            "account": c.get("account", ""),
+                                            "website": c.get("website") or ""}
                                            for i, c in enumerate(creds)]})
             return
         if args.command == "add":

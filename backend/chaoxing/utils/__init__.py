@@ -1,7 +1,25 @@
 """Pure utility functions — snapshot parsing, text cleaning, shell helpers."""
 
+import random
 import re
+import time
 from typing import Optional
+
+
+def human_delay(base_seconds: float, jitter_ratio: float = 0.25,
+                min_seconds: float = 0.1) -> float:
+    """Sleep for ``base_seconds`` with a human-like random jitter.
+
+    Keeps the overall pace slightly irregular (e.g. 3s becomes roughly
+    2.25–3.75s) so repeated operations do not look machine-uniform, while
+    staying bounded so long waits cannot balloon out of control. Returns the
+    actual number of seconds slept (useful for tests).
+    """
+    low = max(min_seconds, base_seconds * (1.0 - jitter_ratio))
+    high = base_seconds * (1.0 + jitter_ratio)
+    delay = random.uniform(low, high)
+    time.sleep(delay)
+    return delay
 
 
 def find_ref_by_text(snapshot_text: str, text: str) -> Optional[str]:

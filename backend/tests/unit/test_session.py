@@ -10,6 +10,9 @@ class TestThreadLocalStore:
 
     def test_default_store(self):
         """_get_tls() should return a _ThreadLocalStore instance."""
+        # Other tests may leave the main thread's session set; reset first so
+        # this test checks the store's default state, not a stale override.
+        set_active_session(None)
         tls = _get_tls()
         assert isinstance(tls, _ThreadLocalStore)
         assert tls.active_session is None

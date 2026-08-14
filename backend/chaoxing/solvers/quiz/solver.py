@@ -10,6 +10,7 @@ Primary target: 概率论与数理统计 (16 quizzes, 100% target score each).
 import time
 import math
 import os
+import random
 from pathlib import Path
 
 from ...constants import TMP_DIR
@@ -25,6 +26,7 @@ from ..content.navigator import _click_chapter_tab
 from ...tracking import ProgressTracker
 from ...ai.router import ai_solve_quiz, ai_solve_quiz_image
 from ...font import get_decrypted_quiz_text
+from ...utils import human_delay
 
 from .stats import QuizStats
 from .extractor import (
@@ -1123,10 +1125,10 @@ class ChapterQuizSolver:
                 log(f"  [{section_key}] Failed to navigate", "ERROR")
                 self.stats["failed"] += 1
                 return False
-            time.sleep(3)  # Wait for quiz to load
+            human_delay(3.0, 0.25)  # Wait for quiz to load
 
         # 2. Wait for quiz iframe to fully load
-        time.sleep(2)
+        human_delay(2.0, 0.25)
 
         # 2b. Already-graded guard. If the section was already submitted, Chaoxing
         # serves the 已批阅 review template (URL .../selectWorkQuestionYiPiYue),
@@ -1324,6 +1326,17 @@ class ChapterQuizSolver:
 
             # Return to chapter tree for next section navigation
             self.go_back_to_chapter_tree()
+
+            # Human-like pacing between real quiz submissions. dry_run and
+            # grade_only never submit, so they skip the pause. A 60–120s
+            # irregular gap between sections keeps the submission rhythm
+            # natural and reduces verification prompts.
+            if (not self.dry_run and not self.grade_only
+                    and i < len(quizzes) - 1):
+                pacing = random.uniform(60, 120)
+                log(f"    Pacing before next quiz: {pacing:.0f}s...")
+                check_signals()
+                time.sleep(pacing)
 
         # Summary
         log(f"\n{'='*60}")

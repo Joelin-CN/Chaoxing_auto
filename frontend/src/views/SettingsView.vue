@@ -84,7 +84,7 @@
         <div v-for="(acc, i) in accountStore.accounts" :key="acc.id" class="creds-row">
           <span class="creds-cell creds-cell--muted">{{ i + 1 }}</span>
           <span class="creds-cell creds-cell--mono">{{ maskPhone(acc.username) }}</span>
-          <span class="creds-cell creds-cell--muted">默认</span>
+          <span class="creds-cell creds-cell--muted">{{ websiteLabel(acc.website) }}</span>
           <span class="creds-cell">
             <button class="btn-link" :disabled="busy" @click="openEdit(acc)">编辑</button>
             <button class="btn-link btn-link--danger" :disabled="busy" @click="askDelete(acc)">
@@ -96,7 +96,7 @@
       <div v-else class="creds-empty">添加第一个账号</div>
       <div class="panel__actions">
         <button class="btn-primary" :disabled="busy" @click="openAdd">添加账号</button>
-        <span class="field__hint">任务运行中不可修改账号</span>
+        <span class="field__hint">{{ busy ? '任务运行中不可修改账号' : '账号修改即时生效' }}</span>
       </div>
     </GlassmorphicPanel>
 
@@ -362,6 +362,14 @@ watch(accountsFilePath, (val) => {
   reloadAccounts()
 })
 
+watch(() => settingsStore.settings.accountsFilePath, (val) => {
+  // Keep the label in sync when the effective file changes through settings
+  // (e.g. a previously saved override), not only via the file picker.
+  if ((val ?? '') !== accountsFilePath.value) {
+    accountsFilePath.value = val ?? ''
+  }
+})
+
 watch(() => settingsStore.settings.perAccountEstimateGB, () => {
   memoryStore.refreshPlan()
 })
@@ -388,10 +396,31 @@ onUnmounted(() => {
 async function reloadAccounts(): Promise<void> {
   accountsError.value = ''
   try {
-    await accountStore.fetchAccounts()
+    await accountStore.refreshAccounts()
+    // The backend owns the *effective* accounts file (set via settings IPC
+    // or the file picker). Re-read it so the label matches what list/add/edit
+    // actually used, even when the renderer store was not the writer.
+    try {
+      const backend = await api.getSettings()
+      const effective = backend.accountsFilePath ?? ''
+      if (effective !== accountsFilePath.value) {
+        accountsFilePath.value = effective
+        settingsStore.updateSetting('accountsFilePath', effective)
+      }
+    } catch {
+      // backend unavailable — keep the current local value
+    }
   } catch (e: any) {
     accountsError.value = e?.message ?? '账号文件解析失败'
   }
+}
+
+function websiteLabel(website?: string): string {
+  if (!website) return '默认'
+  if (website.includes('passport2.chaoxing.com/login') && website.includes('fid=')) {
+    return '默认'
+  }
+  return website.replace(/^https?:\/\//, '').split('/')[0] || '默认'
 }
 
 async function saveAi(): Promise<void> {

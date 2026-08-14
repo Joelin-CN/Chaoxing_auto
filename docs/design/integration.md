@@ -15,7 +15,7 @@
 ```
 Electron 主进程  ──spawn──▶  python -m chaoxing.api --job-id ... --accounts ... --mode ...
        │                              │
-       │  stdin: PAUSE/RESUME/STOP    │  stdout: PROGRESS/PHASE/LOG/TICKET/RESULT/ERROR/DONE
+       │  stdin: PAUSE/RESUME/STOP    │  stdout: PROGRESS/PHASE/LOG/TICKET/RESULT/ERROR/MEMORY/DONE
        │        RESOLVE_TICKET(JSON)  │  (每行一个 JSON 对象)
        ◀──────────────────────────────
 ```
@@ -26,7 +26,9 @@ Electron 主进程  ──spawn──▶  python -m chaoxing.api --job-id ... --
 
 ```bash
 python -m chaoxing.api --job-id <id> --accounts <idx,...> --mode <full|scan_only|solve_only> \
-                       [--courses <name,...>] [--chromium-flags "<flags>"]
+                       [--courses <name,...>] [--grade-only] [--content-only] \
+                       [--max-concurrent <n>] [--budget-gb <gb>] \
+                       [--system-limit-gb <gb>] [--per-account-estimate-gb <gb>]
 ```
 
 | 参数 | 必填 | 说明 |
@@ -35,9 +37,12 @@ python -m chaoxing.api --job-id <id> --accounts <idx,...> --mode <full|scan_only
 | `--accounts` | 是 | 账号索引，逗号分隔（`0` 或 `0,1,2`），最大 50 |
 | `--mode` | 是 | `full` / `scan_only` / `solve_only` |
 | `--courses` | 否 | 课程名/ID 过滤，逗号分隔（子串匹配），省略=全部 |
-| `--chromium-flags` | 否 | 前端 PythonBridge 每次启动都会注入；后端已接受并透传至 Chrome 启动 |
+| `--grade-only` | 否 | 模拟运行：填答案并 AI 评分，但不提交 |
+| `--content-only` | 否 | 跳过答题阶段，仅完成内容章节 |
+| `--max-concurrent` / `--budget-gb` / `--system-limit-gb` / `--per-account-estimate-gb` | 否 | Electron 按内存/CPU 计划计算后注入；CLI 直跑可省略 |
 
-> **注意**：`--chromium-flags` 前端**每次都传**。后端 argparse 已定义此参数（早期未定义导致 exit 2 秒退，已修复）。整合时若前端改了注入方式，确认仍以 `--chromium-flags "<空格分隔>"` 形式传入。
+> **注意**：早期版本存在 `--chromium-flags` 参数，现已移除——省内存参数改由工作区
+> `.playwright/cli.config.json` 生效，Electron 不再传该参数。
 
 其余独立子命令：
 - **余额查询**：`python -m chaoxing.balance` —— 单行 `BALANCE` JSON 或失败 `ERROR`+exit 1。须用装有 `volcengine-python-sdk` 的解释器（推荐 conda 环境 `chaoxing-backend`）拉起，凭证读 `data/passwords/volc_billing.txt`。详见 `api.md` §4.7。
@@ -49,9 +54,9 @@ python -m chaoxing.api --job-id <id> --accounts <idx,...> --mode <full|scan_only
 **stdout 是 JSON-line 协议通道，严禁 `print()` 调试输出污染。** 所有日志/调试信息走 stderr。
 后端已在 `constants.py` 强制 UTF-8 包裹 stdout/stderr（Windows）。整合时前端解析 stdout 必须**逐行 `JSON.parse`**，对非 JSON 行容错（理论上不应出现，但 stderr 偶有第三方库输出，不要混入 stdout 解析）。
 
-事件与信号的完整枚举、字段、生命周期见 `FRONTEND_BACKEND_API.md`：
+事件与信号的完整枚举、字段、生命周期见 **[api.md](api.md)**：
 - §4.2 stdin 入站（`PAUSE`/`RESUME`/`STOP` 明文 + `RESOLVE_TICKET` JSON）
-- §4.3 stdout 出站（`PROGRESS`/`PHASE`/`LOG`/`TICKET`/`RESULT`/`ERROR`/`DONE`）
+- §4.3 stdout 出站（`PROGRESS`/`PHASE`/`LOG`/`TICKET`/`RESULT`/`ERROR`/`MEMORY`/`DONE`）
 
 ### 人工介入（验证码）是唯一的双向交互闭环
 前端最容易踩坑的就是这条链路，整合时重点联调：
@@ -74,23 +79,23 @@ python -m chaoxing.api --job-id <id> --accounts <idx,...> --mode <full|scan_only
 | `chaoxing_config.json` | ★ 主配置（课程/URL/超时/重试），**项目根** | 跟随根目录；路径见下方注意 |
 | `scripts/` | 向后兼容 shim（`utils.py` 重导出 + ps1 CLI 入口） | 可随仓库保留；前端不依赖 |
 | `chaoxing_cli.ps1` / `.bat` | PowerShell 交互式 CLI（独立于前端的人工运行入口） | 保留，前端整合后仍可用于手测 |
-| `tests/` | 单元测试（536 pass / 541，5 个预存无关失败） | 保留 |
-| `data/passwords/` | 凭证（**已 gitignore，绝不入库**） | 整合后仍须保证不进版本库 |
+| `tests/` | 单元测试（587 pass / 587） | 保留 |
+| `data/passwords/`（仓库根级） | 凭证（**已 gitignore，绝不入库**） | 整合后仍须保证不进版本库 |
 | `docs/` | 后端开发文档 / 会话 handoff | 保留或归档 |
-| `FRONTEND_BACKEND_API.md` | ★ IPC 协议手册 | 整合后置于双方都能引用处 |
+| `docs/design/api.md` | ★ IPC 协议手册（三层权威契约） | 整合后双方统一引用 |
 
 ### 运行时产物边界（重要：整合后路径靠环境变量定位）
 源码 `chaoxing/` **不写**任何运行时文件。所有产物限定在项目根下：
 
 | 产物 | 目录 | 已 gitignore |
 |------|------|:---:|
-| 进度状态 / 课程发现 / 答题统计 (JSON) | `output/` | ✅ |
-| 临时 JS、题目/验证码截图 (PNG) | `temp/` | ✅ |
-| 运行日志 / 异常日志 | `logs/` | ✅ |
+| 进度状态 / 课程发现 / 答题统计 (JSON) | `data/output/` | ✅ |
+| 临时 JS、题目/验证码截图 (PNG) | `data/temp/` | ✅ |
+| 运行日志 / 异常日志 | `data/logs/` | ✅ |
 
 **环境变量 `CHAOXING_WORKSPACE`**：决定上述目录与 `chaoxing_config.json` 的根位置。
-不设时回退到 `chaoxing/` 的父目录（即仓库根）。
-> ⚠️ **整合 monorepo 后最大的坑**：若后端被挪到 `backend/` 之类的子目录，前端 spawn 后端时**必须把 `CHAOXING_WORKSPACE` 指到后端子树根**（即 `chaoxing_config.json` 与 `output/`/`temp/`/`logs/` 所在层），否则配置与产物会落到错误位置。本次整理已把配置移到根，进一步整合时同步确认这一点。
+不设时回退到 `chaoxing/` 的父目录（即后端子树根 `backend/`）。
+> ⚠️ **整合 monorepo 后最大的坑**：前端 spawn 后端时**必须把 `CHAOXING_WORKSPACE` 指到后端子树根 `backend/`**（即 `chaoxing_config.json` 所在层），否则配置与产物会落到错误位置；`CHAOXING_DATA_DIR` 则指向仓库级 `data/`。
 
 ---
 
@@ -110,7 +115,7 @@ python -m chaoxing.api --job-id <id> --accounts <idx,...> --mode <full|scan_only
 
 ## 6. 整合检查清单
 
-- [ ] 前端 spawn 命令对齐 §2 参数表（尤其 `--chromium-flags` 仍按空格分隔字符串传入）
+- [ ] 前端 spawn 命令对齐 §2 参数表（`--max-concurrent` / `--budget-gb` / `--system-limit-gb` / `--per-account-estimate-gb` 由 Electron 计算后传入）
 - [ ] 前端确认 `CHAOXING_WORKSPACE` 指向后端子树根、`CHAOXING_DATA_DIR` 指向仓库级 `data/`（配置与产物分层）
 - [ ] stdout 逐行 `JSON.parse`，对非 JSON 行容错；不把 stderr 混入协议解析
 - [ ] 验证码人工介入链路端到端联调：弹窗 → 回传 → 答错重试（新图/同 id/不重置倒计时）→ 终态关框

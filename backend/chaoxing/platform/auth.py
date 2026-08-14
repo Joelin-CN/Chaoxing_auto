@@ -22,6 +22,13 @@ from ..session import _get_active_session
 from ..logging_setup import log
 from ..browser.engine import pw, pw_snapshot, pw_click, pw_goto
 from ..browser.js_runner import pw_run_code_file, pw_extract_result
+from ..utils import human_delay
+
+# playwright-cli's `list` talks to a single daemon socket. When multiple
+# account threads probe at once (3-account start), the daemon can queue the
+# calls and leave every caller blocked. Serialize the probes and bound them so
+# a wedged daemon degrades to "unknown" instead of hanging a whole lane.
+_PLAYWRIGHT_LIST_LOCK = threading.Lock()
 
 
 # ── Credential Parsing ───────────────────────────────────────────
@@ -32,6 +39,7 @@ def _parse_credential_block(block: str) -> dict | None:
     Handles both formats:
         account:13251303918
         account[0]:13251303918
+        website[0]:https://example.com/login
 
     Returns {account, password, website, index} or None.
     """
@@ -50,8 +58,8 @@ def _parse_credential_block(block: str) -> dict | None:
         key = key.strip().lower()
         value = value.strip().strip('"').strip("'").strip('{}').strip()
 
-        # Extract index from account[N] / password[N]
-        m = re.match(r'(account|password)\[(\d+)\]', key)
+        # Extract index from account[N] / password[N] / website[N]
+        m = re.match(r'(account|password|website|网站)\[(\d+)\]', key)
         if m:
             key = m.group(1)
             index = int(m.group(2))
@@ -126,13 +134,15 @@ def read_all_chaoxing_credentials() -> list[dict]:
             blocks[i] = blocks[i].rstrip('}').rstrip() + "\n}"
 
         accounts = []
-        seen_indices = set()
+        seen_accounts = set()
+        used_indices = set()
         for block in blocks:
             cred = _parse_credential_block(block)
-            if cred and cred["account"] not in seen_indices:
-                if cred["index"] == 0 and seen_indices:
-                    cred["index"] = max(seen_indices) + 1
-                seen_indices.add(cred["account"])
+            if cred and cred["account"] not in seen_accounts:
+                if cred["index"] == 0 and used_indices:
+                    cred["index"] = max(used_indices) + 1
+                seen_accounts.add(cred["account"])
+                used_indices.add(cred["index"])
                 accounts.append(cred)
                 log(f"Loaded credentials [{cred['index']}]: {cred['account'][:3]}***"
                     f" (website={'default' if 'fid' in cred['website'] else 'custom'})")
@@ -165,11 +175,17 @@ def is_chaoxing_browser_open() -> bool:
     """Check if the chaoxing browser session is already running."""
     session = _get_active_session()
     cli = cfg("playwright_cli", "playwright-cli.cmd")
-    result = subprocess.run(
-        [cli, "list"],
-        cwd=str(WORKSPACE), capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=10, shell=False,
-    )
+    with _PLAYWRIGHT_LIST_LOCK:
+        try:
+            result = subprocess.run(
+                [cli, "list"],
+                cwd=str(WORKSPACE), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=8, shell=False,
+            )
+        except subprocess.TimeoutExpired:
+            log("playwright-cli list timed out — treating session as unknown",
+                "WARN")
+            return False
     return f"{session}:" in result.stdout or session in result.stdout
 
 
@@ -189,14 +205,15 @@ def _session_is_headed(session: str) -> bool | None:
     ensure_chaoxing_browser.
     """
     cli = cfg("playwright_cli", "playwright-cli.cmd")
-    try:
-        result = subprocess.run(
-            [cli, "list"],
-            cwd=str(WORKSPACE), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=10, shell=False,
-        )
-    except Exception:
-        return None
+    with _PLAYWRIGHT_LIST_LOCK:
+        try:
+            result = subprocess.run(
+                [cli, "list"],
+                cwd=str(WORKSPACE), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=8, shell=False,
+            )
+        except Exception:
+            return None
 
     in_block = False
     for raw_line in result.stdout.splitlines():
@@ -292,7 +309,7 @@ def ensure_chaoxing_browser(account_index: int = 0) -> bool:
         # a default (headless) session — the bug that masked the 无头 toggle.
         log(f"[!] playwright-cli open failed (rc={result.returncode}): "
             f"{(result.stderr or result.stdout or '').strip()[:300]}")
-    time.sleep(4)
+    human_delay(4.0, 0.25)
 
     # Navigate via the engine after the session is up: pw_goto JSON-escapes
     # the URL, so query strings containing '&' survive the cmd.exe wrapper.
@@ -373,6 +390,20 @@ def chaoxing_login(account_index: int = 0) -> bool:
         log(f"Already logged into Chaoxing (account {account_index})", "OK")
         return True
 
+    # 1b. Stale-session recovery: a session that is listed but stuck on a
+    # blank/crashed page would make every pw_goto time out. Close and reopen
+    # once before going down the normal login path.
+    if "about:blank" in snap or "页面崩溃" in snap or "aw, snap" in snap.lower():
+        log("Session is on a blank/crashed page, re-creating browser...", "WARN")
+        close_chaoxing_browser(account_index)
+        if not ensure_chaoxing_browser(account_index):
+            log("Failed to reopen Chaoxing browser", "ERROR")
+            return False
+        snap = pw_snapshot()
+        if "个人空间" in snap or "i.chaoxing.com/base" in snap:
+            log(f"Already logged into Chaoxing (account {account_index})", "OK")
+            return True
+
     # 2. Read credentials for this account
     all_creds = read_all_chaoxing_credentials()
     if not all_creds or account_index >= len(all_creds):
@@ -389,7 +420,7 @@ def chaoxing_login(account_index: int = 0) -> bool:
     if not already_on_login:
         log("Navigating to Chaoxing login page...")
         pw_goto(login_url)
-        time.sleep(3)
+        human_delay(3.0, 0.25)
 
         snap = pw_snapshot()
 
@@ -400,7 +431,7 @@ def chaoxing_login(account_index: int = 0) -> bool:
         if "用户登录" not in snap and "passport2.chaoxing.com" not in snap:
             log("Unexpected page, retrying with base login URL...", "WARN")
             pw_goto("https://passport2.chaoxing.com/login")
-            time.sleep(3)
+            human_delay(3.0, 0.25)
             snap = pw_snapshot()
             if "个人空间" in snap:
                 log("Already logged in (redirected)", "OK")
@@ -474,7 +505,14 @@ def chaoxing_login(account_index: int = 0) -> bool:
         }}
 
         await loginBtn.click();
-        await page.waitForTimeout(5000);
+        // Human-like: brief pause, then wait for the redirect off the login
+        // page instead of a blind fixed sleep.
+        await page.waitForTimeout(1200 + Math.floor(Math.random() * 800));
+        await page.waitForURL(
+            (u) => !u.includes('passport2.chaoxing.com/login'),
+            {{ timeout: 10000 }}
+        ).catch(() => {{}});
+        await page.waitForTimeout(800 + Math.floor(Math.random() * 1200));
 
         const url = page.url();
         const title = await page.title();
@@ -656,11 +694,11 @@ def _chaoxing_login_via_snapshot(account: str, password: str) -> bool:
     except Exception:
         pass
 
-    time.sleep(0.5)
+    human_delay(0.5, 0.4)
 
     # Click login
     pw_click(login_ref)
-    time.sleep(5)
+    human_delay(5.0, 0.2)
 
     snap = pw_snapshot()
     if "个人空间" in snap or "i.chaoxing.com/base" in snap:

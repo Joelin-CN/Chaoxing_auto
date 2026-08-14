@@ -30,6 +30,9 @@ python -m chaoxing.api --job-id "job_004" --accounts "0,1,2" --mode full
 | `--accounts` | 是 | 账号索引，逗号分隔（如 `0` 或 `0,1,2`），最大 50 |
 | `--mode` | 是 | 执行模式：`full`（全部）/ `scan_only`（扫描）/ `solve_only`（刷题） |
 | `--courses` | 否 | 课程过滤，逗号分隔（子串匹配） |
+| `--grade-only` | 否 | 模拟运行：填答案并 AI 评分，但不提交 |
+| `--content-only` | 否 | 跳过答题阶段，仅完成内容章节 |
+| `--max-concurrent` / `--budget-gb` / `--system-limit-gb` / `--per-account-estimate-gb` | 否 | Electron 按内存/CPU 计划注入；CLI 直跑可省略 |
 
 **JSON-line 输出（stdout，每行一个 JSON）：**
 
@@ -38,6 +41,7 @@ python -m chaoxing.api --job-id "job_004" --accounts "0,1,2" --mode full
 | `PROGRESS` | 进度更新：`percent` (0-100), `message` |
 | `PHASE` | 阶段变更：idle → login → scan_courses → process_sections → solve_quiz → completed |
 | `LOG` | 结构化日志：`level` (debug/info/warn/error), `timestamp` (ISO 8601) |
+| `MEMORY` | 运行时内存预算快照：`budgetGB` / `projectChromeGB` / `remainingCount` 等 |
 | `TICKET` | 需人工介入：验证码、警告、错误 |
 | `RESULT` | 结果数据载荷 |
 | `ERROR` | 错误事件：`error` 消息 + 可选 `stack` traceback |
@@ -88,27 +92,20 @@ python -m chaoxing.api --job-id "job_004" --accounts "0,1,2" --mode full
 }
 ```
 
-**`passwords/pwd.txt`** — DeepSeek 账号（AI 答题）：
+**`passwords/doubao.txt`** — 豆包 API 密钥（AI 答题）：
 ```text
-{
-    网站:https://chat.deepseek.com/
-    账号:手机号
-    密码:密码
-}
+ARK_API_KEY="ark-..."
+model="ep-xxxxxxxxxxxxx"
 ```
 
-**`passwords/doubao.txt`** — 豆包 API 密钥（可选，替代 DeepSeek）：
-```text
-ARK_API_KEY:your-api-key
-model:ep-xxxxxxxxxxxxx
-```
+> `pwd.txt` / DeepSeek Web 后端已移除，不再需要。
 
 ---
 
 ## 项目结构
 
 ```
-chaoxing.(xuexitong\
+Chaoxing_auto/backend\
 ├── chaoxing/                  # ★ 核心 Python 包（41 模块，前后端分离）
 │   ├── api.py                 # JSON-line 协议入口（StdioProtocol + StdinController）
 │   ├── orchestrator.py        # 顶层编排器（RunConfig + run_multi_account）
@@ -143,14 +140,11 @@ chaoxing.(xuexitong\
 │   └── ...
 ├── chaoxing_cli.ps1           # PowerShell 交互式 CLI（向后兼容）
 ├── chaoxing_cli.bat           # 最小启动器
-├── output/                    # 运行时持久化产物
-├── temp/                      # 临时文件（JS 脚本 + 截图）
-├── logs/                      # 运行日志 + 异常日志（按日滚动）
-│   ├── chaoxing_YYYYMMDD.log
-│   └── chaoxing_errors_YYYYMMDD.log
 └── tests/                     # 测试套件
-    └── unit/                  # 单元测试（578 pass / 578）
+    └── unit/                  # 单元测试（587 pass / 587）
 ```
+
+> 运行时产物（`output/` / `temp/` / `logs/` / `passwords/` / `chrome-profiles/`）统一落在仓库根级 `data/`。
 
 ### 路径架构说明
 
@@ -237,20 +231,20 @@ chaoxing_cli.ps1
        │    └─ ChapterContentBot      →  视频/文档自动完成
        ├─ Thread: chaoxing-account-1  →  session: chaoxing-chrome-1
        │    └─ (同上)
-       └─ DEEPSEEK_LOCK               →  共享 DeepSeek 会话串行化
+       └─ MemoryMonitor              →  运行时内存预算闸门
 ```
 
 - 每个账户独立的浏览器会话 (`chaoxing-chrome-N`)
 - 线程本地存储 (`threading.local`) 隔离会话状态
-- 共享 DeepSeek 浏览器会话通过 `DEEPSEEK_LOCK` 串行访问
+- 运行时内存监测（`MemoryMonitor`）按预算闸门排队，超预算账号等待
 - `SHUTDOWN_FLAG` (threading.Event) 实现优雅关闭
 
 ### 答题流水线
 
 ```
 solve_quiz(section)
-  ├─ 1. 字体解密文本模式 (Tab0)          ← 快速，当前字体加密未完全破解
-  ├─ 2. V2 元素截图 + 批量识图 (Tab1)    ← 主力方案 (Strategy A)
+  ├─ 1. 字体解密文本模式                 ← 快速，当前字体加密未完全破解
+  ├─ 2. V2 元素截图 + 批量识图           ← 主力方案 (Strategy A)
   ├─ 3. 旧版逐题截图 + 单批识图          ← 回退
   ├─ 4. 整页截图                          ← 回退
   └─ 5. Snapshot 文本提取                 ← 最后手段
@@ -275,7 +269,7 @@ solve_quiz(section)
 
 ### API 接口文档
 
-详细的三层接口文档见 **[docs/design/reference/API_REFERENCE.md](docs/design/reference/API_REFERENCE.md)**，涵盖：
+详细的三层接口文档见 **[../docs/design/reference/API_REFERENCE.md](../docs/design/reference/API_REFERENCE.md)**，涵盖：
 
 | 章节 | 内容 |
 |------|------|
@@ -284,7 +278,7 @@ solve_quiz(section)
 | utils.py | 全部公共函数签名 / Playwright CLI 封装 / 登录逻辑 / 扫描逻辑 / AI 路由 |
 | ChapterQuizSolver | 答题流水线 / V2 截图策略 / DOM 容器隔离点击 / QuizStats 统计 / Grade-Only 模式 |
 | ChapterContentBot | 内容完成机器人接口 |
-| AI 后端 | Doubao API (OpenAI SDK) / DeepSeek Web (浏览器自动化) / 阻塞检测 |
+| AI 后端 | Doubao API (OpenAI SDK) / 阻塞检测 |
 | JavaScript 注入 | 全部内联 JS 模式 / DOM 选择器 / iframe 操作 / 字体解密 |
 | 配置文件 | 完整 JSON schema / 凭证格式 / 运行时产物 / Session 命名 |
 | CLI↔Python 协议 | stdout 解析 / 特殊标记 / 优雅关闭 / 多账户并发 |
@@ -298,12 +292,12 @@ solve_quiz(section)
 - **Python → playwright-cli**: `utils.pw()` 封装，自动附加 session + headed 标志，JSON 编码绕过 shell 转义
 - **JS 注入**: 统一 `_run_js_file()` 模式 — 写 temp → `pw_run_code_file` (shell=False) → 清理
 - **AI 路由**: `ai.provider` 目前仅支持 `doubao-api`（`ai/router.py` 工厂校验）
-- **多线程**: Python `threading.Thread` + `threading.local` 隔离 session，`DEEPSEEK_LOCK` 串行化 DeepSeek 访问
+- **多线程**: Python `threading.Thread` + `threading.local` 隔离 session，运行时信号量 + `MemoryMonitor` 控制并发
 - **暂停/退出**: 统一走 **stdin 控制信号**（`PAUSE`/`RESUME`/`STOP`），Python 在安全点调用 `check_signals()` 检测；旧版基于本地文件标志位（`.pause_flag`/`.quit_flag`，及 `P`/`Q` 文件）的机制已移除
 
 ---
 
-## 当前状态
+## 当前状态（历史快照，2026-06）
 
 | 课程 | 进度 | Quiz | Content |
 |------|------|------|---------|
@@ -318,8 +312,7 @@ solve_quiz(section)
 
 1. **Quiz 已截止** — 所有 quiz 显示"已截止，不能作答"，只能 grade-only 验证
 2. **字体加密** — `_decrypt_font.js` 解密后仍有乱码，Tab0 文本模式不可用
-3. **DeepSeek 偶发漏题** — 6/16 quiz 各漏 1 题（概率论公式密集题型）
-4. **`chaoxing_cli.bat` 菜单循环** — 第一次带参数运行后返回菜单不再传参（已修复，见 2026-06-24 日志）
+3. **`chaoxing_cli.bat` 菜单循环** — 第一次带参数运行后返回菜单不再传参（已修复，见 2026-06-24 日志）
 
 ---
 

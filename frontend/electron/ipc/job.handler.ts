@@ -116,7 +116,11 @@ function updateRunningLanes(
   })
 }
 
-function markTerminalLanes(job: JobStatus, status: JobLaneStatus['status'], progress: number): void {
+function markTerminalLanes(
+  job: JobStatus,
+  status: JobLaneStatus['status'],
+  progress: number | null = null,
+): void {
   if (!job.lanes?.length) return
   job.lanes = job.lanes.map((lane) => {
     if (lane.status === 'stopped' || lane.status === 'error') {
@@ -125,7 +129,11 @@ function markTerminalLanes(job: JobStatus, status: JobLaneStatus['status'], prog
     return {
       ...lane,
       status,
-      progress,
+      ...(status === 'completed'
+        ? { progress: 100 }
+        : progress !== null
+          ? { progress }
+          : {}),
       currentTask: status === 'completed' ? 'Completed' : lane.currentTask,
       currentPhase: status === 'completed' ? 'completed' : lane.currentPhase,
     }
@@ -155,6 +163,19 @@ function selectedControlUnsupported(): never {
   throw new Error(
     'Per-account runtime control is not supported by the current Python backend. Use the global pause/resume/stop controls in Electron mode.',
   )
+}
+
+/**
+ * Clear the global bridge/job state only when the event belongs to the
+ * currently active bridge. A previous job's Python process can still emit
+ * exit/error events after a new job has been started; without this guard the
+ * stale event would null out the new job's bridge and active flag.
+ */
+function clearActiveJobIfCurrent(current: PythonBridge | null): void {
+  if (!current || bridge !== current) return
+  bridge = null
+  activeJobId = null
+  setJobActive(false)
 }
 
 /**
@@ -214,8 +235,9 @@ function resumeWholeJob(job: JobStatus): void {
 }
 
 function stopWholeJob(job: JobStatus): void {
-  if (bridge?.isRunning()) {
-    bridge.stop()
+  const stoppedBridge = bridge
+  if (stoppedBridge?.isRunning()) {
+    stoppedBridge.stop()
   }
 
   // The visible Chrome is a child of the playwright-cli *daemon*, not of the
@@ -236,9 +258,7 @@ function stopWholeJob(job: JobStatus): void {
     )
   }
 
-  activeJobId = null
-  bridge = null
-  setJobActive(false)
+  clearActiveJobIfCurrent(stoppedBridge)
 }
 
 function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
@@ -248,7 +268,6 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     const job = jobs.get(jobId)
     if (!job) return
 
-    job.progress = event.percent
     job.message = event.message
     if (typeof event.phaseIndex === 'number') {
       job.phaseIndex = event.phaseIndex
@@ -258,6 +277,11 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     }
 
     if (typeof event.accountId === 'number' && job.lanes?.length) {
+      // A per-course "Completed" event can carry 100% when a single-course job
+      // still has more phases to run (e.g. quiz done, content pending). Cap
+      // the lane at 99% until the account-level "DONE" terminal event.
+      const laneProgress =
+        event.percent >= 100 && !/^DONE/.test(event.message) ? 99 : event.percent
       job.lanes = job.lanes.map((lane) => {
         if (lane.accountId !== event.accountId) return lane
         const status = event.laneStatus === 'queued'
@@ -268,12 +292,18 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
         return {
           ...lane,
           status,
-          progress: event.percent,
+          progress: laneProgress,
           currentTask: event.message,
           currentPhase: event.phase ?? lane.currentPhase,
         }
       })
+      // Overall job progress = average of active lane progress, so one
+      // finished lane no longer forces the whole job to show 100%.
+      job.progress = Math.round(
+        job.lanes.reduce((sum, lane) => sum + lane.progress, 0) / job.lanes.length,
+      )
     } else {
+      job.progress = event.percent
       updateRunningLanes(job, (lane) => ({
         ...lane,
         progress: event.percent,
@@ -323,7 +353,7 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     job.message = event.error
     job.phase = (event.phase as JobStatus['phase']) ?? 'error'
     markTerminalLanes(job, 'error', job.progress)
-    setJobActive(false)
+    if (bridge === currentBridge) setJobActive(false)
     if (getCurrentSettings().notifications) {
       new Notification({ title: '超星助手', body: `任务异常：${event.error}` }).show()
     }
@@ -334,19 +364,27 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     const job = jobs.get(jobId)
     if (!job) return
 
+    // The backend emits ERROR followed by DONE on failure. Once the job is in
+    // the error state, DONE must not flip it back to "completed".
+    if (job.status === 'error' || job.status === 'stopped') {
+      clearActiveJobIfCurrent(currentBridge)
+      return
+    }
+
     job.status = 'completed'
     job.phase = 'completed'
-    job.progress = 100
+    job.progress = job.lanes?.length
+      ? Math.round(job.lanes.reduce((sum, lane) => sum + lane.progress, 0) / job.lanes.length)
+      : 100
     job.message = 'Job completed.'
     job.finishedAt = new Date().toISOString()
-    markTerminalLanes(job, 'completed', 100)
-    setJobActive(false)
+    markTerminalLanes(job, 'completed')
     if (getCurrentSettings().notifications) {
       new Notification({ title: '超星助手', body: '任务已全部完成。' }).show()
     }
 
     sendToRenderer(win, IPC_CHANNELS.ON_COMPLETED, event)
-    activeJobId = null
+    clearActiveJobIfCurrent(currentBridge)
   })
 
   currentBridge.on('result', (event) => {
@@ -363,9 +401,7 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
       job.message = `Python process exited with code ${code}.`
       markTerminalLanes(job, 'error', job.progress)
     }
-    bridge = null
-    activeJobId = null
-    setJobActive(false)
+    clearActiveJobIfCurrent(currentBridge)
   })
 
   return currentBridge

@@ -49,29 +49,27 @@ export const useAccountStore = defineStore('account', () => {
     return pendingFetch
   }
 
-  async function refreshAccountStatus(accountId: string): Promise<void> {
-    try {
-      const updated = await api.getAccountStatus(accountId)
-      const idx = accounts.value.findIndex((a) => a.id === accountId)
-      if (idx !== -1) accounts.value[idx] = updated
-    } catch (e: any) {
-      error.value = e?.message ?? 'Failed to refresh account status'
-    }
+  async function refreshAccounts(): Promise<void> {
+    // Bypass the loaded-cache so add/edit/remove/file-switch reflect
+    // immediately instead of requiring a page reload.
+    loaded.value = false
+    pendingFetch = null
+    await fetchAccounts()
   }
 
   async function addAccount(payload: { account: string; password: string; website?: string }): Promise<void> {
     await api.addAccount(payload)
-    await fetchAccounts()
+    await refreshAccounts()
   }
 
   async function editAccount(payload: { index: number; password?: string; website?: string }): Promise<void> {
     await api.editAccount(payload)
-    await fetchAccounts()
+    await refreshAccounts()
   }
 
   async function removeAccount(index: number): Promise<void> {
     await api.removeAccount(index)
-    await fetchAccounts()
+    await refreshAccounts()
   }
 
   function toggleAccountSelection(accountId: string): void {
@@ -113,7 +111,7 @@ export const useAccountStore = defineStore('account', () => {
     selectedAccounts,
     hasSelection,
     fetchAccounts,
-    refreshAccountStatus,
+    refreshAccounts,
     addAccount,
     editAccount,
     removeAccount,
