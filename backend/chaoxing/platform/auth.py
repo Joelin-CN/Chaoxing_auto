@@ -264,6 +264,11 @@ def ensure_chaoxing_browser(account_index: int = 0) -> bool:
         else:
             return True
 
+    # A previous run may have left orphaned chrome.exe processes (e.g. the
+    # Python process was force-killed before its finally block ran). Sweep
+    # them before opening so the new session does not contend for the profile.
+    _kill_orphaned_chrome(account_index)
+
     cli = cfg("playwright_cli", "playwright-cli.cmd")
     log(f"Opening Chaoxing browser session ({session})...")
 
@@ -352,17 +357,61 @@ def close_chaoxing_browser(account_index: int = 0) -> bool:
         result = subprocess.run(
             [cli, f"-s={session}", "close"],
             cwd=str(WORKSPACE), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=20, shell=False,
+            encoding="utf-8", errors="replace", timeout=20, shell=True,
         )
         if result.returncode != 0 and result.stderr:
             log(f"[Account {account_index}] close warning: "
                 f"{result.stderr[:150]}", "WARN")
         else:
             log(f"[Account {account_index}] browser session closed")
-        return result.returncode == 0
+        ok = result.returncode == 0
     except Exception as e:
         log(f"[Account {account_index}] failed to close browser: {e}", "WARN")
-        return False
+        ok = False
+
+    # Give the daemon a moment to reap the Chrome tree, then sweep anything
+    # that still references this account profile (belt-and-suspenders: the
+    # daemon can be wedged or the close can race a force-kill).
+    human_delay(1.0, 0.2)
+    _kill_orphaned_chrome(account_index)
+    return ok
+
+
+def _kill_orphaned_chrome(account_index: int) -> int:
+    """Force-terminate chrome.exe processes bound to an account profile.
+
+    playwright-cli's daemon normally reaps its Chrome children on ``close``,
+    but if the daemon is wedged or the Python process was force-killed before
+    its finally block ran, the whole Chrome tree can linger in Task Manager.
+    The sweep is scoped strictly to the project's profile directory so the
+    user's own Chrome browser is never touched.
+
+    Returns the number of processes terminated (0 when nothing matched).
+    """
+    profile_dir = CHROME_PROFILES_DIR / f"account-{account_index}"
+    escaped = str(profile_dir).replace("'", "''")
+    script = (
+        "$ps = Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\";"
+        f"$hits = $ps | Where-Object {{ $_.CommandLine -like '*{escaped}*' }};"
+        "$ids = @($hits | ForEach-Object { $_.ProcessId });"
+        "foreach ($id in $ids) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue };"
+        "[Console]::Out.Write($ids.Count)"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=20, shell=False,
+        )
+        stdout = getattr(result, "stdout", None) or ""
+        count = int(stdout.strip() or "0")
+        if count:
+            log(f"Killed {count} orphaned Chrome process(es) for "
+                f"{profile_dir.name}", "WARN")
+        return count
+    except Exception as e:
+        log(f"Orphaned Chrome cleanup failed: {e}", "WARN")
+        return 0
 
 
 # ── Login Methods ────────────────────────────────────────────────

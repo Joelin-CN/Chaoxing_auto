@@ -316,18 +316,44 @@ class TestDiscoverCourses:
     @patch("chaoxing.discover.scan_course_sections")
     @patch("chaoxing.discover.scan_courses")
     @patch("chaoxing.discover.load_config")
-    def test_zero_total_courses_without_config(self, mock_load_config, mock_scan,
-                                                mock_scan_sections, mock_progress,
-                                                mock_log):
-        """0/0 courses without config entries should be skipped without full scan."""
+    def test_zero_total_courses_are_scanned(self, mock_load_config, mock_scan,
+                                            mock_scan_sections, mock_progress,
+                                            mock_log):
+        """0/0 courses are scanned too — the listing card total is unreliable."""
         mock_scan.return_value = [
             {"name": "ZeroTask", "courseid": "101", "clazzid": "201",
              "done": 0, "total": 0, "percent": 0},
         ]
         mock_load_config.return_value = {"courses": []}
+        mock_scan_sections.return_value = {
+            "ok": True, "done": 0, "total": 0,
+            "quiz_sections": [], "content_sections": [], "chapters": [],
+        }
         result = discover_courses()
         assert len(result) == 1
         assert result[0]["total_tasks"] == 0
+        assert mock_scan_sections.called
+
+    @patch("chaoxing.discover.log")
+    @patch("chaoxing.discover.progress")
+    @patch("chaoxing.discover.scan_course_sections")
+    @patch("chaoxing.discover.scan_courses")
+    @patch("chaoxing.discover.load_config")
+    def test_zero_total_course_completed_excluded(self, mock_load_config,
+                                                   mock_scan, mock_scan_sections,
+                                                   mock_progress, mock_log):
+        """0/0 course that is actually 100% done must be excluded after scan."""
+        mock_scan.return_value = [
+            {"name": "DoneHidden", "courseid": "101", "clazzid": "201",
+             "done": 0, "total": 0, "percent": 0},
+        ]
+        mock_load_config.return_value = {"courses": []}
+        mock_scan_sections.return_value = {
+            "ok": True, "done": 12, "total": 12,
+            "quiz_sections": [], "content_sections": [], "chapters": [],
+        }
+        result = discover_courses()
+        assert result == []
 
     @patch("chaoxing.discover.log")
     @patch("chaoxing.discover.progress")

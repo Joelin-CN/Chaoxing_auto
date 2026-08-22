@@ -165,24 +165,14 @@ def discover_courses(course_filter: str = None) -> list[dict]:
 
     dynamic_courses = []
     for i, info in enumerate(course_infos):
-        # Skip full section scan for 0/0 courses without config entries
-        if info.get("total", 0) == 0:
-            _cfg = load_config()
-            _has_config = any(
-                c.get("courseid") and c["name"] == info["name"]
-                for c in _cfg.get("courses", [])
-            )
-            if not _has_config:
-                config_dict = build_dynamic_course_config(info, {
-                    "ok": True, "done": 0, "total": 0,
-                    "quiz_sections": [], "content_sections": [],
-                    "chapters": [],
-                })
-                dynamic_courses.append(config_dict)
-                progress(_acct_idx, f"Skipping: {info['name']}", i + 1, len(course_infos))
-                continue
-            else:
-                log(f"[{i+1}/{len(course_infos)}] {info['name']}: 0/0 on listing but has config entry — scanning anyway")
+        # The listing card's "任务点进度" is unreliable: 0/0 can mean
+        # "no tasks", "fully completed", or "has tasks but the card failed to
+        # render progress". Only a real chapter-tree scan can tell them apart,
+        # so scan 0/0 courses too instead of assuming they are empty.
+        is_zero_listing = info.get("total", 0) == 0
+        if is_zero_listing:
+            log(f"[{i+1}/{len(course_infos)}] {info['name']}: 0/0 on listing "
+                f"— scanning sections to determine real state")
 
         progress(_acct_idx, f"Scanning: {info['name']}", i + 1, len(course_infos))
         log(f"[{i+1}/{len(course_infos)}] Scanning sections: {info['name']}...")
@@ -191,6 +181,20 @@ def discover_courses(course_filter: str = None) -> list[dict]:
         )
         if not sections.get("ok", True):
             log(f"  Failed to scan sections: {sections.get('reason', '?')}", "ERROR")
+            if is_zero_listing:
+                # Keep a placeholder so the course stays visible/retryable.
+                dynamic_courses.append(build_dynamic_course_config(info, {
+                    "ok": True, "done": 0, "total": 0,
+                    "quiz_sections": [], "content_sections": [],
+                    "chapters": [],
+                }))
+            continue
+
+        done = sections.get("done", 0)
+        total = sections.get("total", 0)
+        if is_zero_listing and total > 0 and done >= total:
+            log(f"  -> actually completed ({done}/{total}), "
+                f"excluding from work list")
             continue
 
         config_dict = build_dynamic_course_config(info, sections)

@@ -17,6 +17,7 @@ def test_open_uses_blank_then_goto(monkeypatch):
     monkeypatch.setattr(auth, "is_chaoxing_browser_open", lambda: False)
     monkeypatch.setattr(auth, "_session_is_headed", lambda s: None)
     monkeypatch.setattr(auth, "cfg", lambda k, d=None: "playwright-cli.cmd")
+    monkeypatch.setattr(auth, "_kill_orphaned_chrome", lambda i: 0)
     monkeypatch.setattr(auth, "read_all_chaoxing_credentials",
                         lambda: [{"index": 0, "account": "a", "password": "p",
                                   "website": "https://x/login?a=1&b=2"}])

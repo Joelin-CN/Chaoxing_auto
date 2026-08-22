@@ -194,13 +194,32 @@ function closeBrowserSessions(accountIds: number[]): void {
   const cli = process.platform === 'win32' ? 'playwright-cli.cmd' : 'playwright-cli'
   for (const id of accountIds) {
     try {
-      execFile(cli, [`-s=chaoxing-chrome-${id}`, 'close'], { timeout: 20000 }, () => {
+      // .cmd wrappers need shell:true on Windows; without it the close was
+      // silently failing and Chrome lingered in Task Manager after every stop.
+      execFile(cli, [`-s=chaoxing-chrome-${id}`, 'close'], { shell: true, timeout: 20000 }, () => {
         // Ignore: session may already be gone, or the daemon may be down.
       })
     } catch {
       // execFile itself only throws synchronously on bad arguments; ignore.
     }
   }
+
+  // After the daemon close attempts, sweep any chrome.exe still bound to a
+  // project profile (e.g. the daemon is wedged or Python was force-killed).
+  // Scoped to the profile root so the user's own Chrome is untouched.
+  setTimeout(() => {
+    const root = path.join(DATA_DIR, 'chrome-profiles')
+    const escaped = root.replace(/'/g, "''")
+    const script =
+      "$ps = Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\";" +
+      `$hits = $ps | Where-Object { $_.CommandLine -like '*${escaped}*' };` +
+      "$hits | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    try {
+      execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout: 30000 }, () => {})
+    } catch {
+      // Cleanup is best-effort; never block the stop response on it.
+    }
+  }, 3000)
 }
 
 function pauseWholeJob(job: JobStatus): void {
