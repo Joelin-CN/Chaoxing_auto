@@ -29,6 +29,9 @@ npm run dev
 # Electron 开发模式（真实 IPC + Python 后端）
 npm run dev:electron
 
+# Electron 模式前置：Python 3.10+（含 openai，见 ../backend/requirements.txt）
+# 与全局 playwright-cli；可在「系统设置 → Python 路径」指定解释器（留空用 PATH）。
+
 # 仅构建 Web 产物 (dist/)
 npm run build:web
 

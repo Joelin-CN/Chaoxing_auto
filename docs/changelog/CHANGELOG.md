@@ -2,6 +2,52 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-08-22 — 全流程检查修复批次（5 P1 + 9 P2）
+
+来源：`VALIDATION_AFTER_FULLCHECK_2026-08-22` 全流程检查（静态 + 实机）发现的问题，
+修复明细与验证见 `VALIDATION_AFTER_FULLCHECK_FIX_2026-08-22.md`。
+
+### P1 修复
+- **Python 启动秒败 UI 永远「运行中」**：根因是 `pythonBridge` 合成事件写死
+  `jobId:'main'` 被 store 过滤器丢弃。修复：bridge 携带真实 jobId；`exit` 路径
+  （进程秒退）也显式推送 `ON_ERROR`；ENOENT 译为中文指引；执行监控挂载时与
+  主进程状态对账；store 终态时把仍在「运行中/排队/暂停」的泳道标记为终态并显示
+  原因。实测伪解释器场景 6 秒内横幅「执行失败」、泳道「异常」+ 中文原因。
+- **真实配置随安装包分发**：`electron-builder.yml` 白名单改打包
+  `chaoxing_config.example.json`；首启 seeding 找不到真配置时回退复制 example。
+  重建包实测：example 在、真实配置不在。
+- **打包缺省内存参数**：白名单加入 `.playwright/cli.config.json`，打包版保留
+  Chromium 降内存 flags（重建包实测在）。
+- **Python 解析统一 + 设置校验**：新增 `electron/python/resolve.ts` 共享解析器
+  （env 覆盖 → 设置 → PATH），5 条 spawn 路径统一走它；余额报错在渲染层剥离
+  `Error invoking remote method` 包装、仪表盘显示真实中文原因；设置页保存与输入
+  时双重校验 pythonPath（存在性 + Python ≥3.10 探测，新增 `system:validate-python`
+  通道）；账号列表加载失败进日志控制台（原先静默空列表）。
+- **playwright-cli 缺失无引导**：后端 `engine.pw()`/`auth` 调用点前置
+  `ensure_cli_available()`（带缓存），缺失时抛中文指引（npm i -g playwright-cli），
+  兼容 shell=True 的「不是内部或外部命令」检测。
+
+### P2 修复
+- 执行席位手机号脱敏（`132****3918`，新增共享 `mask.ts`）。
+- 「模拟运行」开关持久化到设置（`dryRun`），切视图/重启不再静默复位。
+- 课程总览「一键扫描/一键全自动」支持账号子集（选中 ≥1 即可用）。
+- `CHAOXING_TIMEOUT_SECTION_COMPLETE` 由前端注入（新增设置项「章节完成超时」）。
+- `job:status` 无参回退当前任务；未找到/无任务的报错改中文；`job:start` 重复启动、
+  同步 spawn 失败报错改中文。
+- 移除无人调用且与 `settings:get/set` 完全重复的 `backend-settings:get/set` 通道
+  （invoke 通道 30 → 28）。
+- 仪表盘「运行时长」标签改为「系统运行」（实为 os.uptime() 语义）。
+- 新增 `backend/requirements-dev.txt`（pytest、pillow）。
+- 文档同步：`docs/design/api.md` 环境变量白名单表补全 12 项；backend README
+  测试数（595）与模块数（47）更新、补依赖安装说明。
+
+### 验证
+- 后端单测 595 passed（新增 7 个 CLI 可用性用例）；前端 vitest 11 passed
+  （新增 mask/错误清洗 9 例）；typecheck 与双端构建通过。
+- 实机复测（CDP 驱动真实界面）：余额中文原因、设置校验拒绝伪路径、脱敏、
+  dryRun 跨重启持久化、单账号子集启动、伪解释器 6 秒失败不卡死、job:status
+  中文报错、真实运行（登录→扫描→停止）无回归、Chrome 清理 chrome.exe = 0。
+
 ## 2026-08-14（收尾）— Chrome 残留清理 / 0-0 课程语义 / 逐步骤识图核查
 
 ### 修复

@@ -74,6 +74,10 @@ python -m chaoxing.api --job-id "job_004" --accounts "0,1,2" --mode full
 | **playwright-cli** | 浏览器自动化 | `npm install -g playwright-cli` |
 | **Google Chrome** | 浏览器内核 | [google.com/chrome](https://www.google.com/chrome/) |
 
+Python 依赖：运行时只需 `pip install -r requirements.txt`（openai 必需；volcengine-python-sdk
+仅余额查询需要）。跑测试或验证码生成工具额外执行
+`pip install -r requirements-dev.txt`（pytest、pillow）。
+
 ### 凭证文件
 
 需要以下文件在 `data/passwords/` 目录下（仓库根级 `data/`，git 忽略）：
@@ -106,7 +110,7 @@ model="ep-xxxxxxxxxxxxx"
 
 ```
 Chaoxing_auto/backend\
-├── chaoxing/                  # ★ 核心 Python 包（41 模块，前后端分离）
+├── chaoxing/                  # ★ 核心 Python 包（47 模块，前后端分离）
 │   ├── api.py                 # JSON-line 协议入口（StdioProtocol + StdinController）
 │   ├── orchestrator.py        # 顶层编排器（RunConfig + run_multi_account）
 │   ├── constants.py           # 全局常量（路径、信号、并发限制）
@@ -141,7 +145,7 @@ Chaoxing_auto/backend\
 ├── chaoxing_cli.ps1           # PowerShell 交互式 CLI（向后兼容）
 ├── chaoxing_cli.bat           # 最小启动器
 └── tests/                     # 测试套件
-    └── unit/                  # 单元测试（587 pass / 587）
+    └── unit/                  # 单元测试（595 pass / 595）
 ```
 
 > 运行时产物（`output/` / `temp/` / `logs/` / `passwords/` / `chrome-profiles/`）统一落在仓库根级 `data/`。

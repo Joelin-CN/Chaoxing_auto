@@ -982,16 +982,28 @@ spawn('python', ['-m', 'chaoxing.api', ...args], {
 --max-old-space-size=512
 ```
 
-**环境变量白名单**:
+**环境变量白名单**（与 `frontend/electron/python/pythonBridge.ts` 的注入列表一一对应）:
 
 | 变量 | 说明 |
 |------|------|
 | `PYTHONUNBUFFERED=1` | 强制无缓冲输出（必需） |
-| `CHAOXING_WORKSPACE` | 项目工作目录 |
+| `CHAOXING_WORKSPACE` | 项目工作目录（dev=backend/，打包=userData/workspace） |
+| `CHAOXING_DATA_DIR` | 运行数据根（dev=仓库 data/，打包=userData/data） |
 | `CHAOXING_HEADED` | 浏览器可见模式 (`"1"` / `"0"`) |
+| `CHAOXING_ACCOUNTS_FILE` | 账号凭证文件覆盖路径（系统设置下发） |
+| `CHAOXING_TIMEOUT_PAGE_LOAD` | 页面加载超时（秒） |
+| `CHAOXING_TIMEOUT_SNAPSHOT` | 快照超时（秒） |
+| `CHAOXING_TIMEOUT_CLICK_ACTION` | 点击超时（秒） |
+| `CHAOXING_TIMEOUT_VIDEO_WATCH` | 视频观看超时（秒） |
+| `CHAOXING_TIMEOUT_QUIZ_ANSWER` | 答题超时（秒） |
+| `CHAOXING_TIMEOUT_SECTION_COMPLETE` | 章节完成超时（秒） |
+| `CHAOXING_RETRY_QUIZ_MAX` | 每题最大重试 |
+| `CHAOXING_RETRY_TARGET_SCORE` | 目标正确率 |
 | `PATH`, `SYSTEMROOT`, `SYSTEMDRIVE`, `TEMP`, `TMP` | 系统基础变量 |
 | `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH` | 用户路径变量 |
 | `PYTHONPATH`, `PYTHONHOME` | Python 环境变量 |
+
+超时/重试变量由前端按系统设置注入；后端解析见 `backend/chaoxing/config.py`（`_env_int`，JSON 值可被 env 覆盖）。
 
 > ⚠️ **安全约束**: 仅白名单环境变量透传。`ARK_API_KEY`、`DOUBAO_TOKEN` 等凭据类环境变量被显式排除。
 
