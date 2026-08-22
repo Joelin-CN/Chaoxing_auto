@@ -62,8 +62,7 @@ export interface ElectronAPI {
   onResult: (cb: (event: PythonResultEvent) => void) => () => void
   onMemory: (cb: (event: PythonMemoryEvent) => void) => () => void
   removeAllListeners: (channel: string) => void
-  getBackendSettings: () => Promise<Settings>
-  setBackendSettings: (partial: Partial<Settings>) => Promise<void>
+  validatePython: (pythonPath: string) => Promise<{ reason: string | null }>
 }
 
 function makeListener<T>(channel: string): (cb: (event: T) => void) => () => void {
@@ -121,6 +120,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onResult: makeListener<PythonResultEvent>(IPC_CHANNELS.ON_RESULT),
   onMemory: makeListener<PythonMemoryEvent>(IPC_CHANNELS.ON_MEMORY),
   removeAllListeners: (channel: string) => ipcRenderer.removeAllListeners(channel),
-  getBackendSettings: () => ipcRenderer.invoke(IPC_CHANNELS.BACKEND_SETTINGS_GET),
-  setBackendSettings: (partial: Partial<Settings>) => ipcRenderer.invoke(IPC_CHANNELS.BACKEND_SETTINGS_SET, partial),
+  validatePython: (pythonPath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_VALIDATE_PYTHON, pythonPath),
 } satisfies ElectronAPI)

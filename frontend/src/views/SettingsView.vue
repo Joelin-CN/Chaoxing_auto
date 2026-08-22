@@ -112,8 +112,11 @@
             class="field__input field__input--wide"
             :value="settingsStore.settings.pythonPath"
             placeholder="python"
-            @change="settingsStore.updateSetting('pythonPath', ($event.target as HTMLInputElement).value)"
+            @change="onPythonPathChange(($event.target as HTMLInputElement).value)"
           />
+          <p v-if="pythonPathFeedback" :class="pythonPathFeedback.ok ? 'field__hint' : 'field__error'">
+            {{ pythonPathFeedback.text }}
+          </p>
         </div>
         <div class="field">
           <label class="field__label">页面加载超时 (秒)</label>
@@ -168,6 +171,17 @@
             min="30"
             max="600"
             @change="settingsStore.updateSetting('quizAnswerTimeout', Number(($event.target as HTMLInputElement).value))"
+          />
+        </div>
+        <div class="field">
+          <label class="field__label">章节完成超时 (秒)</label>
+          <input
+            type="number"
+            class="field__input"
+            :value="settingsStore.settings.sectionCompleteTimeout"
+            min="5"
+            max="120"
+            @change="settingsStore.updateSetting('sectionCompleteTimeout', Number(($event.target as HTMLInputElement).value))"
           />
         </div>
         <div class="field">
@@ -351,6 +365,30 @@ const editing = ref<{ id: number | null } | null>(null)
 const deleting = ref<Account | null>(null)
 const form = ref({ account: '', password: '', website: '' })
 const formError = ref('')
+
+// Inline validation for the Python path: checked while the user edits so a
+// broken path never silently saves (SETTINGS_SET also hard-rejects it).
+const pythonPathFeedback = ref<{ ok: boolean; text: string } | null>(null)
+
+async function onPythonPathChange(value: string): Promise<void> {
+  const trimmed = value.trim()
+  pythonPathFeedback.value = null
+  if (!trimmed) {
+    settingsStore.updateSetting('pythonPath', '')
+    return
+  }
+  try {
+    const { reason } = await api.validatePython(trimmed)
+    if (reason) {
+      pythonPathFeedback.value = { ok: false, text: `✗ ${reason}` }
+      return // don't persist an invalid path
+    }
+    pythonPathFeedback.value = { ok: true, text: '✓ 解释器可用' }
+    settingsStore.updateSetting('pythonPath', trimmed)
+  } catch (e: any) {
+    pythonPathFeedback.value = { ok: false, text: `校验失败：${e?.message ?? '未知错误'}` }
+  }
+}
 
 const planMax = computed(() => memoryStore.plan?.maxConcurrent ?? 8)
 const concurrencyTarget = computed(() => settingsStore.settings.concurrencyTarget)

@@ -135,6 +135,20 @@ export const useExecutionStore = defineStore('execution', () => {
     endTime.value = Date.now()
     stopTimer()
     stopAllLaneTimers()
+    // On failure/stop, lanes that never saw a backend event (e.g. the Python
+    // process died at spawn) would otherwise keep claiming 运行中 under a
+    // failed banner. Mark them terminal and surface the reason.
+    if (nextStatus === 'error' || nextStatus === 'stopped') {
+      lanes.value = lanes.value.map((lane) => {
+        const active = lane.status === 'running' || lane.status === 'queued' || lane.status === 'paused'
+        if (!active) return lane
+        return {
+          ...lane,
+          status: nextStatus,
+          errorMessage: nextStatus === 'error' ? (error.value ?? lane.errorMessage) : lane.errorMessage,
+        }
+      })
+    }
     unregisterEventListeners()
   }
 

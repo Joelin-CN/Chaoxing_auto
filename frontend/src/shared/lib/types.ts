@@ -228,6 +228,9 @@ export interface Settings {
   clickTimeout: number
   videoWatchTimeout: number
   quizAnswerTimeout: number
+  sectionCompleteTimeout: number
+  /** Persisted 模拟运行 guard: solve/fill/grade but never submit. */
+  dryRun: boolean
 }
 
 export interface LogLine {
@@ -298,6 +301,8 @@ export interface ChaoxingApi {
   /** Query the Volcengine (Doubao) cash balance. Decoupled from the job stream;
    *  spawns the chaoxing-backend interpreter on the Electron side. */
   getBalance(): Promise<Balance>
+  /** Validate a candidate pythonPath (existence + >= 3.10); null reason = ok. */
+  validatePython(pythonPath: string): Promise<{ reason: string | null }>
   /** Live system resources (RAM/CPU/uptime) for the dashboard panel. */
   getSystemResources(): Promise<SystemResources>
   getMemoryPlan(): Promise<MemoryPlan>

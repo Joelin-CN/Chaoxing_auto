@@ -2,6 +2,10 @@ import type { ChaoxingApi } from './types'
 import { ElectronApiClient } from './ipcClient'
 import { MockApiClient } from './mockClient'
 
+// Re-export so stores can strip ipcRenderer.invoke wrapper text without
+// reaching into the concrete client module.
+export { stripInvokeErrorPrefix } from './ipcClient'
+
 // Singleton instance — all stores share ONE client.
 //
 // Previously each of the 5 Pinia stores called createApiClient() at module

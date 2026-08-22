@@ -90,7 +90,8 @@
         <div class="panel__header">
           <span class="panel__title">系统资源</span>
           <Chip v-if="mockMode" variant="warn" size="sm">模拟数据</Chip>
-          <span class="panel__sub">运行时长 {{ uptime }}</span>
+          <!-- os.uptime() — the machine's uptime, not the app's. -->
+          <span class="panel__sub">系统运行 {{ uptime }}</span>
         </div>
         <div class="resource-item">
           <div class="resource-header">
@@ -187,9 +188,10 @@ const balanceValue = computed(() => {
 const balanceLabel = computed(() => {
   if (balanceError.value) {
     // Keep the stat label short; the full reason is available as a hover
-    // tooltip and in the DevTools console.
+    // tooltip and in the DevTools console. Errors are real Chinese reasons
+    // (the invoke wrapper is stripped in ipcClient), so allow more room.
     const short = balanceError.value.split('\n')[0]
-    return `余额查询失败：${short.length > 30 ? `${short.slice(0, 30)}…` : short}`
+    return `余额查询失败：${short.length > 60 ? `${short.slice(0, 60)}…` : short}`
   }
   if (!balance.value) return 'API 可用余额'
   return `${balance.value.provider} 可用余额（现金 ¥ ${balance.value.cashBalance}）`

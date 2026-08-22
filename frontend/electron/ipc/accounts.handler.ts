@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import path from 'path'
 import { spawn } from 'child_process'
 import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
+import { resolvePythonPath } from '../python/resolve'
 import { getCurrentSettings } from './status.handler'
 import { isJobActive } from './jobState'
 import type { Account } from '../types'
@@ -21,7 +22,7 @@ import { IPC_CHANNELS } from '../types'
 
 /** Interpreter for the listing/mutations (no SDK needed — stdlib parse). */
 function getAccountsPython(): string {
-  return getCurrentSettings().pythonPath || 'python'
+  return resolvePythonPath().pythonPath
 }
 
 const ACCOUNTS_TIMEOUT_MS = 15_000

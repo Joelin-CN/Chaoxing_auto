@@ -385,6 +385,8 @@ export class MockApiClient implements ChaoxingApi {
       clickTimeout: 10,
       videoWatchTimeout: 60,
       quizAnswerTimeout: 120,
+      sectionCompleteTimeout: 15,
+      dryRun: false,
     }
   }
 
@@ -482,6 +484,11 @@ export class MockApiClient implements ChaoxingApi {
       currency: 'CNY',
       checkedAt: Date.now(),
     }
+  }
+
+  async validatePython(_pythonPath: string): Promise<{ reason: string | null }> {
+    await sleep(120)
+    return { reason: null }
   }
 
   async getSystemResources(): Promise<SystemResources> {

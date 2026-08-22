@@ -56,6 +56,34 @@ def _escape_ps_string(text: str) -> str:
 
 # ── Core pw() ───────────────────────────────────────────────────
 
+_CLI_AVAILABILITY_CACHE: set = set()
+
+
+class PlaywrightCliMissingError(RuntimeError):
+    """playwright-cli is not installed or not reachable on PATH."""
+
+    def __init__(self, cli: str):
+        super().__init__(
+            f"未找到 playwright-cli（{cli}）。请先安装 Node.js 18+，再执行 "
+            f"npm install -g playwright-cli，并确认其位于系统 PATH 中"
+            f"（安装说明见 README「前置依赖」）。"
+        )
+
+
+def ensure_cli_available(cli: str) -> None:
+    """Raise a friendly PlaywrightCliMissingError when the CLI is missing.
+
+    pw() runs hundreds of times per job, so the PATH scan result is cached
+    per CLI name — it only needs to fail once to be conclusive.
+    """
+    if cli in _CLI_AVAILABILITY_CACHE:
+        return
+    from shutil import which
+    if which(cli) is None and which(cli.removesuffix(".cmd").removesuffix(".bat")) is None:
+        raise PlaywrightCliMissingError(cli)
+    _CLI_AVAILABILITY_CACHE.add(cli)
+
+
 def pw(*args, timeout: int = None, use_shell: bool = False) -> str:
     """Run a playwright-cli command and return stdout.
 
@@ -68,6 +96,7 @@ def pw(*args, timeout: int = None, use_shell: bool = False) -> str:
     """
     session = _get_active_session()
     cli = cfg("playwright_cli", "playwright-cli.cmd")
+    ensure_cli_available(cli)
     t = timeout or cfg("timeouts.snapshot", 15)
 
     # Headed mode: check CHAOXING_HEADED env var (set by chaoxing_cli.ps1 --headed)
@@ -106,8 +135,15 @@ def pw(*args, timeout: int = None, use_shell: bool = False) -> str:
             shell=False,
         )
 
-    if result.returncode != 0 and result.stderr:
-        print(f"[pw] Warning: {result.stderr[:200]}", file=sys.stderr)
+    if result.returncode != 0:
+        stderr = result.stderr or ""
+        # shell=True path: cmd.exe reports a missing command instead of
+        # raising FileNotFoundError, so detect its localized error text too.
+        if ("is not recognized" in stderr
+                or "不是内部或外部命令" in stderr) and cli.split(".")[0] in stderr:
+            raise PlaywrightCliMissingError(cli)
+        if stderr:
+            print(f"[pw] Warning: {stderr[:200]}", file=sys.stderr)
     return result.stdout
 
 

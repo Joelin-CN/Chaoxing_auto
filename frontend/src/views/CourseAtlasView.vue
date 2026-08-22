@@ -53,10 +53,10 @@
       <div v-if="extraAccountCount > 0" class="extra-hint">更多账号... (+{{ extraAccountCount }})</div>
 
       <div class="left-actions">
-        <button class="btn btn--outline btn--block" :disabled="!allAccountsSelected || executionStore.isRunning" @click="scanClicked">
+        <button class="btn btn--outline btn--block" :disabled="noAccountSelected || executionStore.isRunning" @click="scanClicked">
           {{ executionStore.isRunning ? '运行中...' : '一键扫描' }}
         </button>
-        <button class="btn btn--primary btn--block" :disabled="!allAccountsSelected" @click="startFullAuto">
+        <button class="btn btn--primary btn--block" :disabled="noAccountSelected" @click="startFullAuto">
           一键全自动
         </button>
       </div>
@@ -165,7 +165,12 @@ const settingsStore = useSettingsStore()
 const memoryStore = useMemoryStore()
 
 const activeAccountId = ref<string | null>(null)
-const dryRun = ref(false)
+// Persisted in settings so the never-submit guard survives view switches —
+// a view-local toggle silently reset and could enable real submissions.
+const dryRun = computed({
+  get: () => settingsStore.settings.dryRun,
+  set: (value: boolean) => settingsStore.updateSetting('dryRun', value),
+})
 const planMax = computed(() => memoryStore.plan?.maxConcurrent ?? settingsStore.settings.concurrencyTarget ?? 8)
 
 function maskPhone(phone: string): string {
@@ -193,6 +198,9 @@ const allAccountsSelected = computed(() =>
   accountStore.accounts.length > 0 &&
   accountStore.selectedAccountIds.size === accountStore.accounts.length,
 )
+
+/** Buttons operate on the selected subset — any non-empty selection works. */
+const noAccountSelected = computed(() => accountStore.selectedAccountIds.size === 0)
 
 const extraAccountCount = computed(() => {
   const total = accountStore.accounts.length

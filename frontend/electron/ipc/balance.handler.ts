@@ -1,8 +1,7 @@
 import { ipcMain } from 'electron'
 import { spawn } from 'child_process'
-import fs from 'fs'
 import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
-import { getCurrentSettings } from './status.handler'
+import { resolvePythonPath } from '../python/resolve'
 import type { BalanceResult } from '../types'
 import { IPC_CHANNELS } from '../types'
 
@@ -17,49 +16,10 @@ import { IPC_CHANNELS } from '../types'
  *
  * IMPORTANT: it depends on `volcengine-python-sdk`. If the configured
  * interpreter lacks the SDK, set CHAOXING_BALANCE_PYTHON to one that has it
- * (e.g. an Anaconda python). Resolution order:
- *   1. CHAOXING_BALANCE_PYTHON env (explicit override).
- *   2. The configured task interpreter (Settings.pythonPath; defaults to the
- *      dedicated conda env that ships volcengine-python-sdk).
- *   3. 'python' on PATH.
+ * (e.g. an Anaconda python). Resolution is delegated to the shared resolver
+ * (env override → Settings.pythonPath → 'python'), failSoft so a stale
+ * absolute path falls back to a launchable interpreter instead of ENOENT.
  */
-
-/** Interpreter for the balance query (must have volcengine-python-sdk). */
-function getBalancePython(): string {
-  const envOverride = process.env.CHAOXING_BALANCE_PYTHON
-  if (envOverride) {
-    console.log(`[balance] balance query interpreter (env override): ${envOverride}`)
-    return envOverride
-  }
-
-  const configured = getCurrentSettings().pythonPath
-  if (configured) {
-    // A stale absolute path left in settings.json (e.g. a system Python without
-    // the SDK) would fail at spawn with ENOENT. Skip it so we fall back to
-    // something launchable instead of failing before even trying.
-    if (!isPathLike(configured) || fs.existsSync(configured)) {
-      console.log(`[balance] balance query interpreter (settings): ${configured}`)
-      return configured
-    }
-    console.warn(
-      `[balance] configured interpreter "${configured}" does not exist; ` +
-        "falling back to 'python' on PATH",
-    )
-  }
-
-  console.log('[balance] balance query interpreter (fallback): python')
-  return 'python'
-}
-
-/** Rough check for an explicit path (as opposed to a bare command name). */
-function isPathLike(value: string): boolean {
-  return (
-    value.includes('/') ||
-    value.includes('\\') ||
-    /^[A-Za-z]:/.test(value) ||
-    value.toLowerCase().endsWith('.exe')
-  )
-}
 
 /** Hard timeout so a hung SDK call can't leave the renderer waiting forever. */
 const BALANCE_TIMEOUT_MS = 30_000
@@ -72,7 +32,11 @@ interface BalanceErrorPayload {
 
 function runBalanceQuery(): Promise<BalanceResult> {
   return new Promise((resolve, reject) => {
-    const pythonPath = getBalancePython()
+    const { pythonPath, warning } = resolvePythonPath({
+      envOverride: process.env.CHAOXING_BALANCE_PYTHON,
+      failSoft: true,
+    })
+    if (warning) console.warn(`[balance] ${warning}`)
 
     // Same env-whitelist policy as PythonBridge: never leak ARK_API_KEY etc.
     // Credentials come from passwords/volc_billing.txt, not the environment.

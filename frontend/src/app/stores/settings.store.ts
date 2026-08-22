@@ -29,8 +29,18 @@ let syncTimer: ReturnType<typeof setTimeout> | null = null
 function debouncedSync(settings: Settings): void {
   if (syncTimer) clearTimeout(syncTimer)
   syncTimer = setTimeout(() => {
-    api.setSettings(settings).catch(() => {
-      // backend not available — localStorage is source of truth
+    api.setSettings(settings).catch((e: any) => {
+      // Rejections here are usually validation failures (e.g. an invalid
+      // Python path) — surface them in the log console instead of dying
+      // silently while localStorage keeps the unsaved value.
+      console.error('[settings] sync to main failed:', e)
+      void import('@/app/stores/log.store')
+        .then(({ useLogStore }) => {
+          useLogStore().addLog('error', `设置保存失败：${e?.message ?? '未知错误'}`, '设置')
+        })
+        .catch(() => {
+          // log store unavailable (early boot) — console.error above suffices
+        })
     })
   }, 1000)
 }

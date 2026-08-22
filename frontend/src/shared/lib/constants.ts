@@ -156,6 +156,8 @@ export const DEFAULT_SETTINGS: Settings = {
   clickTimeout: 10,
   videoWatchTimeout: 60,
   quizAnswerTimeout: 120,
+  sectionCompleteTimeout: 15,
+  dryRun: false,
 }
 
 export const DEFAULT_FORECAST: Record<ObjectiveType, CampaignForecast> = {

@@ -26,6 +26,18 @@ function requireAPI() {
   return window.electronAPI
 }
 
+/**
+ * ipcRenderer.invoke wraps any main-process rejection as
+ * "Error invoking remote method '<channel>': <real message>" (optionally with a
+ * nested "Error:" prefix). Strip both so UI surfaces show the real reason.
+ */
+export function stripInvokeErrorPrefix(message: string): string {
+  return message
+    .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+    .replace(/^Error:\s*/i, '')
+    .trim()
+}
+
 function mapMode(mode: string): 'full' | 'scan_only' | 'solve_only' {
   if (mode === 'course-scan' || mode === 'section-scan' || mode === 'dry-run') return 'scan_only'
   if (mode === 'batch-exec') return 'solve_only'
@@ -268,6 +280,8 @@ export class ElectronApiClient implements ChaoxingApi {
       clickTimeout: raw.clickTimeout ?? 10,
       videoWatchTimeout: raw.videoWatchTimeout ?? 60,
       quizAnswerTimeout: raw.quizAnswerTimeout ?? 120,
+      sectionCompleteTimeout: raw.sectionCompleteTimeout ?? 15,
+      dryRun: raw.dryRun ?? false,
     }
   }
 
@@ -287,6 +301,8 @@ export class ElectronApiClient implements ChaoxingApi {
       clickTimeout: settings.clickTimeout,
       videoWatchTimeout: settings.videoWatchTimeout,
       quizAnswerTimeout: settings.quizAnswerTimeout,
+      sectionCompleteTimeout: settings.sectionCompleteTimeout,
+      dryRun: settings.dryRun,
       quizRetryCount: settings.quizRetryCount,
       targetAccuracy: settings.targetAccuracy,
     } as any)
@@ -343,7 +359,16 @@ export class ElectronApiClient implements ChaoxingApi {
   }
 
   async getBalance(): Promise<Balance> {
-    const raw = await requireAPI().getBalance()
+    let raw
+    try {
+      raw = await requireAPI().getBalance()
+    } catch (e: any) {
+      // ipcRenderer.invoke wraps handler rejections as
+      // "Error invoking remote method 'balance:query': <real reason>".
+      // Strip the wrapper so the UI shows the actionable reason (e.g. the
+      // backend's volcengine-python-sdk guidance), not truncated boilerplate.
+      throw new Error(stripInvokeErrorPrefix(e?.message ?? '') || '余额查询失败')
+    }
     return {
       provider: raw.provider,
       accountId: raw.accountId,
@@ -355,6 +380,11 @@ export class ElectronApiClient implements ChaoxingApi {
       currency: raw.currency,
       checkedAt: new Date(raw.checkedAt).getTime(),
     }
+  }
+
+  /** Validate a candidate pythonPath in the main process (inline UI feedback). */
+  async validatePython(pythonPath: string): Promise<{ reason: string | null }> {
+    return requireAPI().validatePython(pythonPath)
   }
 
   async getSystemResources(): Promise<SystemResources> {

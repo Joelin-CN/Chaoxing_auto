@@ -143,7 +143,7 @@ function markTerminalLanes(
 function getJobOrThrow(jobId: string): JobStatus {
   const job = jobs.get(jobId)
   if (!job) {
-    throw new Error(`Job ${jobId} not found.`)
+    throw new Error(`未找到任务 ${jobId}（可能已重启应用）。`)
   }
   return job
 }
@@ -417,8 +417,17 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     if (job && job.status !== 'completed' && job.status !== 'stopped' && job.status !== 'error') {
       job.status = 'error'
       job.phase = 'error'
-      job.message = `Python process exited with code ${code}.`
+      job.message = `Python 进程异常退出（exit ${code}）。请检查「系统设置 → Python 路径」与后端依赖。`
       markTerminalLanes(job, 'error', job.progress)
+      // The backend died before emitting DONE, so the renderer would wait
+      // forever — push the terminal state explicitly.
+      sendToRenderer(win, IPC_CHANNELS.ON_ERROR, {
+        type: 'ERROR',
+        jobId,
+        error: job.message,
+        phase: 'error',
+        recoverable: false,
+      })
     }
     clearActiveJobIfCurrent(currentBridge)
   })
@@ -453,7 +462,7 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
     }
 
     if (activeJobId) {
-      throw new Error(`Job ${activeJobId} is already running. Stop it first.`)
+      throw new Error(`任务 ${activeJobId} 正在运行，请先停止再启动新任务。`)
     }
 
     const jobId = generateJobId()
@@ -505,7 +514,7 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
               '--per-account-estimate-gb', String(plan.perAccountEstimateGB))
 
     try {
-      bridge.start(args)
+      bridge.start(args, jobId)
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
       jobStatus.status = 'error'
@@ -514,7 +523,7 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
       markTerminalLanes(jobStatus, 'error', 0)
       activeJobId = null
       bridge = null
-      throw new Error(`Failed to start Python process: ${message}`)
+      throw new Error(`启动 Python 后端进程失败：${message}`)
     }
 
     setJobActive(true)
@@ -570,8 +579,18 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
     return selectedControlUnsupported()
   })
 
-  ipcMain.handle(IPC_CHANNELS.JOB_STATUS, async (_event, jobId: string) => {
-    return cloneJob(getJobOrThrow(jobId))
+  ipcMain.handle(IPC_CHANNELS.JOB_STATUS, async (_event, jobId?: string) => {
+    // No id → the active job (the common renderer query). A caller asking for
+    // an unknown id gets a Chinese message instead of "Job undefined not found".
+    const target = jobId ?? activeJobId ?? undefined
+    if (!target) {
+      throw new Error('当前没有可查询的任务。')
+    }
+    const job = jobs.get(target)
+    if (!job) {
+      throw new Error(`未找到任务 ${target}（可能已重启应用）。`)
+    }
+    return cloneJob(job)
   })
 
   ipcMain.handle(IPC_CHANNELS.JOB_RESOLVE_TICKET, async (_event, payload: ResolveTicketPayload) => {

@@ -152,8 +152,15 @@ export function ensureWorkspaceSeeded(): void {
     fs.mkdirSync(path.join(DATA_DIR, dir), { recursive: true })
   }
 
+  // The real chaoxing_config.json never ships (it holds the developer's
+  // course IDs/progress) — fall back to the packaged example so the workspace
+  // still gets a valid, user-editable config on first launch.
   copyIfAbsent(
     path.join(CODE_DIR, 'chaoxing_config.json'),
+    path.join(WORKSPACE_DIR, 'chaoxing_config.json'),
+  )
+  copyIfAbsent(
+    path.join(CODE_DIR, 'chaoxing_config.example.json'),
     path.join(WORKSPACE_DIR, 'chaoxing_config.json'),
   )
 

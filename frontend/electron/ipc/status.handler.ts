@@ -4,6 +4,7 @@ import fs from 'fs'
 import type { AccountStatus, Settings, Ticket } from '../types'
 import { IPC_CHANNELS, DEFAULT_SETTINGS } from '../types'
 import { isJobActive } from './jobState'
+import { validatePythonForSettings } from '../python/resolve'
 
 // ----------------------------------------------------------------
 // Settings persistence
@@ -101,6 +102,12 @@ export function registerStatusHandlers(): void {
     if (isJobActive() && lockedKeys.some((k) => k in partial)) {
       throw new Error('任务运行中不可修改该设置。')
     }
+    // Catch a broken interpreter at save time — otherwise every later spawn
+    // fails with ENOENT for a reason the user can't see in the settings page.
+    if (typeof partial.pythonPath === 'string' && partial.pythonPath.trim()) {
+      const reason = await validatePythonForSettings(partial.pythonPath)
+      if (reason) throw new Error(`Python 路径无效：${reason}`)
+    }
     currentSettings = { ...currentSettings, ...partial }
     saveSettings(currentSettings)
   })
@@ -122,16 +129,5 @@ export function registerStatusHandlers(): void {
     ticket.resolved = true
     ticket.resolution = resolution
     ticket.resolvedAt = Date.now()
-  })
-
-  // ---- backend-settings:get ----
-  ipcMain.handle(IPC_CHANNELS.BACKEND_SETTINGS_GET, async () => {
-    return { ...currentSettings }
-  })
-
-  // ---- backend-settings:set ----
-  ipcMain.handle(IPC_CHANNELS.BACKEND_SETTINGS_SET, async (_event, partial: Partial<Settings>) => {
-    currentSettings = { ...currentSettings, ...partial }
-    saveSettings(currentSettings)
   })
 }

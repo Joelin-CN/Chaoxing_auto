@@ -20,7 +20,10 @@ from ..constants import WORKSPACE, TMP_DIR, CREDS_DIR, CHROME_PROFILES_DIR
 from ..config import cfg
 from ..session import _get_active_session
 from ..logging_setup import log
-from ..browser.engine import pw, pw_snapshot, pw_click, pw_goto
+from ..browser.engine import (
+    pw, pw_snapshot, pw_click, pw_goto,
+    PlaywrightCliMissingError, ensure_cli_available,
+)
 from ..browser.js_runner import pw_run_code_file, pw_extract_result
 from ..utils import human_delay
 
@@ -175,6 +178,7 @@ def is_chaoxing_browser_open() -> bool:
     """Check if the chaoxing browser session is already running."""
     session = _get_active_session()
     cli = cfg("playwright_cli", "playwright-cli.cmd")
+    ensure_cli_available(cli)
     with _PLAYWRIGHT_LIST_LOCK:
         try:
             result = subprocess.run(
@@ -186,6 +190,8 @@ def is_chaoxing_browser_open() -> bool:
             log("playwright-cli list timed out — treating session as unknown",
                 "WARN")
             return False
+        except FileNotFoundError:
+            raise PlaywrightCliMissingError(cli)
     return f"{session}:" in result.stdout or session in result.stdout
 
 
@@ -270,6 +276,7 @@ def ensure_chaoxing_browser(account_index: int = 0) -> bool:
     _kill_orphaned_chrome(account_index)
 
     cli = cfg("playwright_cli", "playwright-cli.cmd")
+    ensure_cli_available(cli)
     log(f"Opening Chaoxing browser session ({session})...")
 
     all_creds = read_all_chaoxing_credentials()
@@ -304,11 +311,14 @@ def ensure_chaoxing_browser(account_index: int = 0) -> bool:
     if _headed:
         cmd.append("--headed")
     cmd.append("about:blank")
-    result = subprocess.run(
-        cmd,
-        cwd=str(WORKSPACE), capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=30, shell=False,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(WORKSPACE), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30, shell=False,
+        )
+    except FileNotFoundError:
+        raise PlaywrightCliMissingError(cli)
     if result.returncode != 0:
         # Surface the failure instead of letting the daemon silently auto-spawn
         # a default (headless) session — the bug that masked the 无头 toggle.
@@ -365,6 +375,10 @@ def close_chaoxing_browser(account_index: int = 0) -> bool:
         else:
             log(f"[Account {account_index}] browser session closed")
         ok = result.returncode == 0
+    except FileNotFoundError:
+        log(f"[Account {account_index}] {PlaywrightCliMissingError(cli)}",
+            "WARN")
+        ok = False
     except Exception as e:
         log(f"[Account {account_index}] failed to close browser: {e}", "WARN")
         ok = False

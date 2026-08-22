@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Account } from '@/shared/lib/types'
-import { createApiClient } from '@/shared/lib/apiClient'
+import { createApiClient, stripInvokeErrorPrefix } from '@/shared/lib/apiClient'
 
 const api = createApiClient()
 
@@ -40,7 +40,14 @@ export const useAccountStore = defineStore('account', () => {
         accounts.value = await api.getAccounts()
         loaded.value = true
       } catch (e: any) {
-        error.value = e?.message ?? 'Failed to fetch accounts'
+        // Surface the reason (e.g. a stale pythonPath) in the log console —
+        // otherwise the atlas just shows an empty, confusing account list.
+        error.value = stripInvokeErrorPrefix(e?.message ?? '') || '账号列表加载失败'
+        void import('@/app/stores/log.store')
+          .then(({ useLogStore }) => {
+            useLogStore().addLog('error', `账号列表加载失败：${error.value}`, '账号')
+          })
+          .catch(() => { /* log store unavailable in early boot */ })
       } finally {
         loading.value = false
         pendingFetch = null

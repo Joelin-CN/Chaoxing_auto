@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
 import { CODE_DIR, DATA_DIR, WORKSPACE_DIR } from '../backendPath'
-import { getCurrentSettings } from './status.handler'
+import { resolvePythonPath } from '../python/resolve'
 import { isJobActive } from './jobState'
 import { IPC_CHANNELS } from '../types'
 
@@ -40,7 +40,7 @@ function validateAndSave(apiKey: string, model: string): void {
 
 function runAiTest(): Promise<{ ok: boolean; reason?: string; models?: number }> {
   return new Promise((resolve) => {
-    const python = getCurrentSettings().pythonPath || 'python'
+    const python = resolvePythonPath().pythonPath
     const env: Record<string, string> = { PYTHONUNBUFFERED: '1' }
     for (const k of ['PATH', 'SYSTEMROOT', 'SYSTEMDRIVE', 'TEMP', 'TMP',
                      'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH']) {

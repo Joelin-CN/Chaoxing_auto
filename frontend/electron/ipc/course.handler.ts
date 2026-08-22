@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { spawn } from 'child_process'
 import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
-import { getCurrentSettings } from './status.handler'
+import { resolvePythonPath } from '../python/resolve'
 import type { Course, ScanCoursesPayload } from '../types'
 import { IPC_CHANNELS } from '../types'
 
@@ -23,7 +23,7 @@ import { IPC_CHANNELS } from '../types'
 
 /** Interpreter for the listing (plain stdlib read of a JSON file — no SDK). */
 function getCoursesPython(): string {
-  return getCurrentSettings().pythonPath || 'python'
+  return resolvePythonPath().pythonPath
 }
 
 /** Hard timeout so a hung read can't leave the renderer waiting forever. */

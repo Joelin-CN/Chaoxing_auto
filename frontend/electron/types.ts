@@ -160,8 +160,11 @@ export interface Settings {
   clickTimeout: number
   videoWatchTimeout: number
   quizAnswerTimeout: number
+  sectionCompleteTimeout: number
   quizRetryCount: number
   targetAccuracy: number
+  /** Persisted 模拟运行 guard — forwarded through settings, used by the renderer. */
+  dryRun: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -183,8 +186,10 @@ export const DEFAULT_SETTINGS: Settings = {
   clickTimeout: 10,
   videoWatchTimeout: 60,
   quizAnswerTimeout: 120,
+  sectionCompleteTimeout: 15,
   quizRetryCount: 10,
   targetAccuracy: 100,
+  dryRun: false,
 }
 
 export interface Ticket {
@@ -333,6 +338,5 @@ export const IPC_CHANNELS = {
   ON_ERROR: 'on-error',
   ON_RESULT: 'on-result',
   ON_MEMORY: 'on-memory',
-  BACKEND_SETTINGS_GET: 'backend-settings:get',
-  BACKEND_SETTINGS_SET: 'backend-settings:set',
+  SYSTEM_VALIDATE_PYTHON: 'system:validate-python',
 } as const

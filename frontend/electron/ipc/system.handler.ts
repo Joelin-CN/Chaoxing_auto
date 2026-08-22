@@ -5,6 +5,7 @@ import type { SystemResources } from '../types'
 import { IPC_CHANNELS } from '../types'
 import { DATA_DIR } from '../backendPath'
 import { getCurrentSettings } from './status.handler'
+import { validatePythonForSettings } from '../python/resolve'
 import {
   computeMemoryPlan,
   measureProjectChromeGB,
@@ -83,6 +84,13 @@ function readResources(): SystemResources {
 export function registerSystemHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SYSTEM_RESOURCES, async () => {
     return readResources()
+  })
+
+  // Validate a candidate pythonPath (existence + Python >= 3.10) without
+  // touching settings — used by the settings page for inline feedback while
+  // the user is still typing.
+  ipcMain.handle(IPC_CHANNELS.SYSTEM_VALIDATE_PYTHON, async (_event, pythonPath: string) => {
+    return { reason: await validatePythonForSettings(String(pythonPath ?? '')) }
   })
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_PLAN, async () => {

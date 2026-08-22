@@ -134,7 +134,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import GlassmorphicPanel from '@/shared/ui/GlassmorphicPanel.vue'
 import GlassmorphicCard from '@/shared/ui/GlassmorphicCard.vue'
 import ProgressBar from '@/shared/ui/ProgressBar.vue'
@@ -142,10 +142,20 @@ import Chip from '@/shared/ui/Chip.vue'
 import { useExecutionStore } from '@/app/stores/execution.store'
 import { useAccountStore } from '@/app/stores/account.store'
 import { useCampaignStore } from '@/app/stores/campaign.store'
+import { maskLogin } from '@/shared/lib/mask'
 
 const executionStore = useExecutionStore()
 const accountStore = useAccountStore()
 const campaignStore = useCampaignStore()
+
+// Reconcile with main-process truth on mount: if a terminal event was missed
+// (e.g. the Python process failed to spawn while this view was not mounted),
+// the banner would otherwise stay "running" forever.
+onMounted(() => {
+  if (executionStore.isRunning) {
+    void executionStore.refreshStatus()
+  }
+})
 
 /* ── computed ── */
 const hasRunData = computed(() =>
@@ -200,7 +210,9 @@ const statusText = computed((): string => {
 /* ── helpers ── */
 function accountName(accountId: string): string {
   const acc = accountStore.accounts.find(a => a.id === accountId)
-  return acc?.displayName ?? acc?.username ?? accountId.slice(0, 8)
+  const name = acc?.displayName ?? acc?.username ?? accountId.slice(0, 8)
+  // Logins are phone numbers — mask them like every other view does.
+  return maskLogin(name)
 }
 
 function laneVariant(status: string): 'accent' | 'ok' | 'warn' | 'gold' {

@@ -2,6 +2,7 @@ import { EventEmitter } from 'events'
 import { spawn, ChildProcess } from 'child_process'
 import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
 import { getCurrentSettings } from '../ipc/status.handler'
+import { resolvePythonPath, pythonNotFoundMessage } from './resolve'
 import type {
   PythonBridgeEvent,
   PythonProgressEvent,
@@ -67,6 +68,7 @@ export class PythonBridge extends EventEmitter {
   private process: ChildProcess | null = null
   private buffer = ''
   private stopping = false
+  private jobId = 'main'
   private killTimer1: NodeJS.Timeout | null = null
   private killTimer2: NodeJS.Timeout | null = null
   private safetyTimer: NodeJS.Timeout | null = null
@@ -76,9 +78,10 @@ export class PythonBridge extends EventEmitter {
   // Real process
   // ================================================================
 
-  start(args: string[]): void {
+  start(args: string[], jobId?: string): void {
     this.buffer = ''
     this.bufferTruncated = false
+    if (jobId) this.jobId = jobId
     // Canonical backend entry is the JSON-line protocol module
     // `python -m chaoxing.api` (NOT the legacy scripts/ shim, which does not
     // speak the protocol). It must run with cwd = backend root so the
@@ -119,13 +122,17 @@ export class PythonBridge extends EventEmitter {
     safeEnv.CHAOXING_TIMEOUT_CLICK_ACTION = String(settings.clickTimeout)
     safeEnv.CHAOXING_TIMEOUT_VIDEO_WATCH = String(settings.videoWatchTimeout)
     safeEnv.CHAOXING_TIMEOUT_QUIZ_ANSWER = String(settings.quizAnswerTimeout)
+    safeEnv.CHAOXING_TIMEOUT_SECTION_COMPLETE = String(settings.sectionCompleteTimeout)
     safeEnv.CHAOXING_RETRY_QUIZ_MAX = String(settings.quizRetryCount)
     safeEnv.CHAOXING_RETRY_TARGET_SCORE = String(settings.targetAccuracy)
 
     const fullArgs = ['-m', 'chaoxing.api', ...args]
 
-    // Honor the configured interpreter (default 'python', resolved via PATH).
-    const pythonPath = settings.pythonPath || 'python'
+    // Honor the configured interpreter via the shared resolver (empty = 'python'
+    // from PATH). Strict mode: a configured-but-missing path is kept so the
+    // spawn fails fast with the friendly message below instead of silently
+    // switching interpreters under a running pipeline.
+    const pythonPath = resolvePythonPath().pythonPath
 
     this.process = spawn(pythonPath, fullArgs, {
       cwd: CODE_DIR,
@@ -157,7 +164,7 @@ export class PythonBridge extends EventEmitter {
           this.bufferTruncated = true
           this.emit('log', {
             type: 'LOG',
-            jobId: 'main',
+            jobId: this.jobId,
             level: 'error',
             message: `[pythonBridge] stdout buffer exceeded ${MAX_STDOUT_BUFFER_BYTES} bytes; head dropped`,
             timestamp: new Date().toISOString(),
@@ -172,7 +179,7 @@ export class PythonBridge extends EventEmitter {
       if (msg) {
         this.emit('log', {
           type: 'LOG',
-          jobId: 'main',
+          jobId: this.jobId,
           level: 'error',
           message: `[stderr] ${msg}`,
           timestamp: new Date().toISOString(),
@@ -191,12 +198,19 @@ export class PythonBridge extends EventEmitter {
       this.process = null
     })
 
-    this.process.on('error', (err) => {
+    this.process.on('error', (err: NodeJS.ErrnoException) => {
+      // ENOENT means the configured interpreter does not exist — the single
+      // most common fresh-machine failure. Translate it so the renderer shows
+      // actionable Chinese guidance instead of the raw Node message.
+      const isENOENT = err.code === 'ENOENT' || /ENOENT/.test(err.message)
+      const message = isENOENT
+        ? pythonNotFoundMessage(pythonPath)
+        : `Python 进程错误：${err.message}`
       this.emit('error', {
         type: 'ERROR',
-        jobId: 'main',
-        error: `Python process error: ${err.message}`,
-        stack: err.stack,
+        jobId: this.jobId,
+        error: message,
+        stack: err.stack ?? err.message,
       })
       // A spawn failure (e.g. ENOENT for the configured interpreter) is
       // terminal: no 'exit' event is guaranteed, so clean up timers and the
@@ -311,7 +325,7 @@ export class PythonBridge extends EventEmitter {
         // Non-JSON line — emit as log
         this.emit('log', {
           type: 'LOG',
-          jobId: 'main',
+          jobId: this.jobId,
           level: 'info',
           message: trimmed,
           timestamp: new Date().toISOString(),

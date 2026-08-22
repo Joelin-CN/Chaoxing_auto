@@ -21,7 +21,11 @@ files:
 # documents/, etc/, tests/ and .playwright-cli/ must NEVER ship in the
 # installer. scripts/ ships only the read-only assets that first-launch
 # seeding copies into the workspace (_table.json, _decrypt_font.js,
-# _v17_section_player.js).
+# _v17_section_player.js). The EXAMPLE config ships (never the developer's
+# real chaoxing_config.json with course IDs/progress); the first-launch
+# seeding copies it to the workspace as chaoxing_config.json. The Chromium
+# memory flags config (.playwright/cli.config.json) also ships — seeding
+# copies it or the packaged app loses those flags.
 extraResources:
   - from: ../backend
     to: backend
@@ -32,7 +36,8 @@ extraResources:
       - scripts/_table.json
       - scripts/_decrypt_font.js
       - scripts/_v17_section_player.js
-      - chaoxing_config.json
+      - chaoxing_config.example.json
+      - .playwright/cli.config.json
       - requirements.txt
 
 win:
